@@ -9,13 +9,13 @@
 - DigiMenu owner session cookie (`digimenu_owner`, 3d TTL, HMAC)
 - Docs: `docs/owner-auth.md`, `docs/owner-dashboard.md`, `.env.example`
 - Local schema: `menu_layout` + `theme` on `restaurantes`
-
-## In progress
-- Git push of DigiMenu owner app + Worker parity
+- Worker: `restaurantes` + fields, `productos.imagen`/`restaurante`, `finca` + 5 products via MCP
+- Deployed `https://digimenu.nachomallavia.workers.dev` (menu smoke OK)
+- Pushed to GitHub `main` (`9e48470`)
 
 ## Next
 - Worker taxonomy `categoria` (admin) + assign terms to products
-- Worker secrets for owner BFF writes
+- Worker secrets for owner BFF writes (`EMDASH_API_TOKEN`, API base)
 - Logo / product image upload from `/app`
 - OAuth / onboarding track
 
@@ -25,4 +25,4 @@
 - Local MCP EmDash may need reconnect after restarting `emdash dev`
 - After DB wipe, also clear `.wrangler/state/v3/kv` for seed/setup
 - Without `EMDASH_API_TOKEN`, owner forms are read-oriented
-- Worker `productos.descripcion` is currently required (local seed: optional) — leave or recreate field
+- Worker `productos.descripcion` is currently required (local seed: optional)

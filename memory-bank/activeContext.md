@@ -1,7 +1,7 @@
 # Active Context
 
 ## Current focus
-Push a Git tras empatar local ↔ workers.dev. Falta taxonomía `categoria` en Worker (admin).
+Post-parity polish: Worker taxonomy `categoria` (admin) + secrets for `/app` writes.
 
 ## Decisions
 - Collections: `restaurantes`, `productos`, `pages`
@@ -16,14 +16,11 @@ Push a Git tras empatar local ↔ workers.dev. Falta taxonomía `categoria` en W
 - Owner session: signed cookie `digimenu_owner` (HMAC, Path=/app, TTL 3 days). Secret: `DIGIMENU_SESSION_SECRET` or fallback `EMDASH_ENCRYPTION_KEY`. Revalidate on POST only.
 
 ## Recent
-- Owner dashboard + session cookie + public menu theme/layout
-- Worker MCP: created `restaurantes` (+ fields), `productos.imagen`/`restaurante`, content `finca` + 5 products
-- Fixed `digimenu-autofill` entrypoint (absolute path) so `astro build` works
-- Deployed to `https://digimenu.nachomallavia.workers.dev`
+- Memory bank updated; Worker schema/content aligned via MCP; code deployed; pushed `9e48470` to `main`
+- Public menu live: https://digimenu.nachomallavia.workers.dev/m/finca
 
 ## Next
-- Push to GitHub
-- Create taxonomy `categoria` on Worker (admin — MCP has no create-taxonomy-def) + assign terms
+- Create taxonomy `categoria` on Worker (admin) + assign terms
 - Worker secrets for `/app` writes (PAT + API base)
 - Media upload for logo/imagen from `/app`
 - OAuth / self-serve onboarding (separate track)
