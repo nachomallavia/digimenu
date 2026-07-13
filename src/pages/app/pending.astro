@@ -1,0 +1,35 @@
+---
+import AppGuest from "../../layouts/AppGuest.astro";
+
+export const prerender = false;
+const error = Astro.url.searchParams.get("error");
+---
+
+<AppGuest title="DigiMenu — Cuenta pendiente">
+	<h1 class="mb-2 text-2xl font-semibold">Cuenta pendiente de vincular</h1>
+	<p class="mb-4 text-muted-foreground">
+		Entraste bien a DigiMenu, pero todavía no hay un restaurante EmDash asociado
+		a tu usuario.
+	</p>
+	{
+		error === "lookup" && (
+			<p class="mb-4 text-error">
+				Hubo un problema al consultar el mapping. Probá más tarde.
+			</p>
+		)
+	}
+	<p class="mb-6">
+		Un admin DigiMenu debe insertar tu fila en
+		<code class="text-sm">owner_restaurants</code> (user_id → emdash_restaurant_id /
+		slug).
+	</p>
+	<p class="text-sm">
+		<a href="/app/auth/logout" class="text-muted-foreground hover:text-foreground"
+			>Salir</a
+		>
+		{" · "}
+		<a href="/app/login" class="text-muted-foreground hover:text-foreground"
+			>Volver al login</a
+		>
+	</p>
+</AppGuest>

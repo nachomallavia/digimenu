@@ -1,0 +1,87 @@
+categoria,nombre,descripcion,precio
+TAPEOS,Pate de Girgolas,"Pate cremoso de hongos Girgola, acompañado de crutons de pan ciabatta con pesto y queso gouda gratinado",18000
+TAPEOS,Burrata,"Colchón de tomates confitados, burrata, pesto de albahaca. Reducción de dulce de rosa mosqueta y naranja, acompañado de crutons gratinados con queso gouda",20000
+TAPEOS,Provoleta,Provoleta pintada con pesto de albahaca y salsa pomodoro,15000
+TAPEOS,Bomba de papa con Gouda y Frambuesa,"Rebozadas en panko y rellenas con queso gouda y dulce de frambuesa (dips de salsa griega, pomodoro o picante)",20000
+TAPEOS,Bomba de papa con mozzarella y queso ahumado,"Rebozadas en panko y rellenas con queso mozzarella y queso ahumado (dips de salsa griega, pomodoro o picante)",20000
+TAPEOS,¡Bomba de papa Finca Una y Una!,"Para que no te quedes con ganas de pedir las anteriores (dips de salsa griega, pomodoro o picante)",20000
+TAPEOS,Tortilla de papa Finca,"Clásica de papa en cubos, sale babe",28000
+TAPEOS,Tortilla de papa española,"Papa en cubos, Chorizo colorado, cebolla caramelizada, sale babe",30000
+TAPEOS,Bastones de pollo rebozados en Panko,"Acompañados de cebolla morada encurtida, dip de salsa griega y siracha",28000
+TAPEOS,Pastel de trucha,"Pastel de trucha neuquina, con morrones ahumados y pure de papa",32000
+TAPEOS,Milanesa de ojo de Bife,"Rebosada en panko, acompañada de pure de papa, boniato y jengibre, con queso gratinado gouda, sobre base de salsa pomodoro",30000
+TAPEOS,Milanesa de Girgola o Berenjena (a elección),"Rebosada en panko, acompañada de pure de papa, boniato y jengibre, con queso gratinado gouda, sobre base de salsa pomodoro",28000
+TAPEOS,Empanadas De Camarón (Vienen dos),"Empanadas al Horno, de camarones y salsa pomodoro",14000
+TAPEOS,Empanadas Salteñas (Vienen dos),"Empanadas al Horno, carne de ternera con papas y aceituna, acompañada de salsa de tomate rallado picante",12000
+TAPEOS,Empanadas De Verdura (Vienen dos),"Empanadas al Horno, berenjena, zucchini, portobellos, champiñones, espinaca, queso regianitto y mozzarella",12000
+SIN ALCOHOL,Coca-Cola / Coca Zero,,4500
+SIN ALCOHOL,Sprite / Sprite Zero,,4500
+SIN ALCOHOL,Schweppes Tónica,,4500
+SIN ALCOHOL,Schweppes Pomelo,,4500
+SIN ALCOHOL,Schweppes Ginger Ale,,4500
+SIN ALCOHOL,Jugo de Naranja Citric,,5500
+SIN ALCOHOL,Agua con gas (500ml),,4500
+SIN ALCOHOL,Agua sin gas (500ml),,4500
+CERVEZAS KRAKEN 473ML,Golden Ale,,7500
+CERVEZAS KRAKEN 473ML,Irish Red,,7500
+CERVEZAS KRAKEN 473ML,American IPA,,8500
+CERVEZAS KRAKEN 473ML,East Coast IPA,,8500
+CERVEZAS KRAKEN 473ML,Session IPA,,8500
+TRAGOS,Fernet Branca + Coca-Cola,,12000
+TRAGOS,Vermut Cinzano,,12000
+TRAGOS,Negroni,,15000
+TRAGOS,Gin Tonic (Beefeater),,12000
+TRAGOS,Ron Havana + Coca-Cola,,12000
+WHISKYS,Black Label,,22000
+WHISKYS,Jameson,,22000
+FILTRADOS,Filtrado 1 persona,"V-60, Origami, Chemex, Aeropress, Hario Switch",12000
+FILTRADOS,Filtrado 2 personas,"V-60, Origami, Chemex, Aeropress, Hario Switch",24000
+FILTRADOS,Filtrado 4 personas (Chemex),"V-60, Origami, Chemex, Aeropress, Hario Switch",40000
+CAFÉ SOLO,Espresso,,4000
+CAFÉ SOLO,Espresso Doble (Doppio),,5000
+CAFÉ SOLO,Long Black,,6000
+CAFÉ ESPRESSO + LECHE,Espresso Macchiato,"Espresso con una pequeña cantidad de espuma de leche finamente texturizada (55ml en taza de 80ml)",5500
+CAFÉ ESPRESSO + LECHE,Cortado,Espresso con leche texturizada (80ml),6000
+CAFÉ ESPRESSO + LECHE,Flat White,Espresso con leche finamente texturizada que realza el sabor (160ml),7000
+CAFÉ ESPRESSO + LECHE,Cappuccino,"Leche finamente texturizada, densa cremosa, con cuerpo. Se puede servir con cacao, canela o ambos (200ml)",7800
+CAFÉ ESPRESSO + LECHE,Moccacino,"Espresso doble con leche y chocolate. Dulce, cremoso e intenso (200ml)",7500
+CAFÉ ESPRESSO + LECHE,Lágrima (Latte Macchiato),"Leche densa y texturizada a la que se le agrega el espresso al final. Leche manchada por el café (200ml)",7500
+CAFÉ ESPRESSO + LECHE,Café con leche chico (Latte),"Espresso con sutil texturización de la leche que aporta cremosidad y densidad (260ml)",8200
+CAFÉ ESPRESSO + LECHE,Café con leche grande,"Espresso doble con un montón de leche",9000
+HORNEADOS,Medialuna,"100% manteca, harina orgánica",5000
+HORNEADOS,Croissant,Hojaldre mantecoso con capas bien pronunciadas,6000
+HORNEADOS,Chipa Finca,"Receta de la casa, 2 unidades",5000
+HORNEADOS,Roll de Canela,Harina orgánica con glaseado finca,7500
+HORNEADOS,Medialuna con Jamón y Queso,,9000
+HORNEADOS,Croissant con Jamón y Queso,,13000
+SIN CAFÉ,Chocolatada,,7500
+SIN CAFÉ,Té,,5000
+SIN CAFÉ,Licuado de Frutos Rojos,,8000
+BOWLS DE YOGUR GRIEGO,Yogur Griego Frutos Rojos,"Yogur sin azúcar, frutos rojos, granola, miel",12000
+BOWLS DE YOGUR GRIEGO,Yogur Griego Tropical,"Yogur, frutos rojos, granola, kiwi, banana",12000
+TORTAS Y ALFAJORES,Torta por porción,Consulte disponibilidad de variedades,19000
+TORTAS Y ALFAJORES,Minicake's,Consulte disponibilidad de variedades,18000
+TORTAS Y ALFAJORES,Alfajor Finca,"Masa sable, dulce de leche, merengue y dulce de frambuesa, recubierto en chocolate negro",13000
+TORTAS Y ALFAJORES,Alfajor Blanco,Relleno clásico de dulce de leche,9000
+TORTAS Y ALFAJORES,Alfajor Negro,Relleno clásico de dulce de leche,9000
+TORTAS Y ALFAJORES,Brownie,De chocolate semi amargo y nueces,8000
+TORTAS Y ALFAJORES,Budín,Consulte disponibilidad de variedades,5500
+POSTRES,Flan,Acompañado de Dulce de leche y crema,10000
+POSTRES,Brownie con Helado,Brownie caliente con helado de vainilla y reducción de frutos rojos,15000
+POSTRES,Tiramisú,"Mascarpone, café de la casa y cacao",12000
+POSTRES,Mousse de Frutos Rojos,Ligero mousse de la casa,10000
+POSTRES,Affogato,Espresso caliente volcado sobre helado de vainilla,10000
+POSTRES,Crumble y Helado,Crumble caliente con helado de vainilla,20000
+TOSTONES Y SÁNDWICHES,Tostón Finca,"Pan de campo, dips de mermelada, dulce de leche y manteca",12000
+TOSTONES Y SÁNDWICHES,Tostón Campo · Huevo y Palta,"Huevo revuelto, palta, tomates Cherry",18000
+TOSTONES Y SÁNDWICHES,Tostón Crudo y Rúcula,"Pan de campo de masa madre, Jamón crudo, rúcula, gouda, tomate cherry confitado y queso philadelphia",18000
+TOSTONES Y SÁNDWICHES,Tostón Crudo, Rúcula y Pera,"Pan de campo de masa madre, Jamón crudo, rúcula, pera caramelizada, gouda, cherry confitado, philadelphia",18000
+TOSTONES Y SÁNDWICHES,Cazuela Huevo, Palta y Cherry,Con tostón de pan de campo de masa madre por separado,18000
+TOSTONES Y SÁNDWICHES,Sándwich en Pan de Chipa,"Rúcula, jamón crudo o cocido a elección y tomates confitados",16000
+TOSTONES Y SÁNDWICHES,Sándwich Tostado Jamón Cocido y Queso,"Pan ciabatta, mucho jamón, mucho queso",18000
+TOSTONES Y SÁNDWICHES,Sándwich Tostado Jamón Crudo y Queso,"Pan ciabatta, mucho jamón crudo, mucho queso",20000
+SÁNDWICHES ESPECIALES,Sándwich de Lomo clásico,"Pan ciabatta orgánico de masa madre, bife de lomo, huevos fritos, queso gouda. Acompañado de papas crocantes al horno. Dips de lactonesa de limón y salsa pomodoro, opcional salsa picante",28000
+SÁNDWICHES ESPECIALES,Sándwich de Lomo y queso azul,"Pan ciabatta orgánico de masa madre, bife de lomo, queso gouda, pesto de albahaca, cebolla morada encurtida. Acompañado de papas crocantes al horno. Dips de lactonesa de limón y salsa pomodoro, opcional salsa picante",30000
+SÁNDWICHES ESPECIALES,Sándwich de Milanesa de ojo de Bife,"Pan ciabatta orgánico de masa madre con pesto de albahaca, milanesa frita de ojo de bife empanada en panko, cama de rúcula y espinaca, crema de mostaza y jarabe de arce, cebolla caramelizada, queso gouda. Acompañado de papas crocantes al horno. Dips de lactonesa de limón y salsa pomodoro, opcional salsa picante",28000
+SÁNDWICHES ESPECIALES,Sándwich de Milanesa de Girgola,"Pan ciabatta con pesto de albahaca, milanesa frita de gírgola empanada en panko, rúcula, albahaca, tomates confitados, queso gouda. Acompañado de papas fritas en cubos. Opción vegetariana. Dips de lacto de limón y salsa pomodoro, opcional salsa picante",27000
+SÁNDWICHES ESPECIALES,Sándwich de Milanesa de berenjena,"Pan ciabatta orgánico de masa madre, milanesa rebosada en panko, pesto de albahaca, queso gouda, cama de rúcula y albahaca, tomates confitados, lactonesa de limón. Acompañado de papas crocantes al horno. Dips de lactonesa de limón y salsa pomodoro, opcional salsa picante",25000

@@ -1,0 +1,157 @@
+---
+import Dashboard from "../../layouts/Dashboard.astro";
+import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
+import {
+	createCategoriaViaApi,
+	deleteCategoriaViaApi,
+	listCategorias,
+	updateCategoriaViaApi,
+	writesEnabled,
+} from "../../lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Badge } from "@/components/starwind/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const canWrite = writesEnabled();
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+const savedAction = Astro.url.searchParams.get("action");
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const action = String(form.get("action") ?? "");
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (action === "create") {
+				const label = String(form.get("label") ?? "").trim();
+				if (!label) throw new Error("El nombre es obligatorio.");
+				await createCategoriaViaApi({ label });
+				await revalidateOwnerSession(Astro.request, Astro.cookies);
+				return Astro.redirect(savedRedirect("/app/categorias", { action: "create" }));
+			} else if (action === "rename") {
+				const slug = String(form.get("slug") ?? "");
+				const label = String(form.get("label") ?? "").trim();
+				if (!slug || !label) throw new Error("Datos incompletos.");
+				await updateCategoriaViaApi(slug, { label });
+				await revalidateOwnerSession(Astro.request, Astro.cookies);
+				return Astro.redirect(savedRedirect("/app/categorias", { action: "rename" }));
+			} else if (action === "delete") {
+				const slug = String(form.get("slug") ?? "");
+				if (!slug) throw new Error("Slug requerido.");
+				await deleteCategoriaViaApi(slug);
+				await revalidateOwnerSession(Astro.request, Astro.cookies);
+				return Astro.redirect(savedRedirect("/app/categorias", { action: "delete" }));
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Error al guardar categoría";
+		}
+	}
+}
+
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+let categorias: Awaited<ReturnType<typeof listCategorias>> = [];
+try {
+	categorias = await listCategorias();
+} catch (err) {
+	error = error ?? (err instanceof Error ? err.message : "Error al listar categorías");
+}
+
+const message = saved
+	? savedAction === "delete"
+		? "Categoría eliminada."
+		: savedAction === "rename"
+			? "Categoría actualizada."
+			: "Categoría creada."
+	: null;
+---
+
+<Dashboard
+	title="DigiMenu — Categorías"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight">Categorías</h1>
+			<p class="text-muted-foreground">Secciones del menú (taxonomy <code>categoria</code>).</p>
+		</div>
+
+		{message && <p class="text-sm text-success">{message}</p>}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Nueva categoría</CardTitle>
+				<CardDescription>Se usa para agrupar productos en el menú público.</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-3 sm:flex-row sm:items-end" enctype="application/x-www-form-urlencoded" data-astro-reload>
+					<input type="hidden" name="action" value="create" />
+					<div class="flex flex-1 flex-col gap-1.5">
+						<Label for="label">Nombre</Label>
+						<Input id="label" name="label" required disabled={!canWrite} placeholder="Ej. Postres" />
+					</div>
+					<Button type="submit" variant="primary" disabled={!canWrite}>
+						Agregar
+					</Button>
+				</form>
+			</CardContent>
+		</Card>
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Existentes</CardTitle>
+			</CardHeader>
+			<CardContent class="flex flex-col gap-4">
+				{
+					categorias.length === 0 ? (
+						<p class="text-sm text-muted-foreground">No hay categorías todavía.</p>
+					) : (
+						categorias.map((cat) => (
+							<div class="flex flex-col gap-3 border-b border-border pb-4 last:border-0 last:pb-0 sm:flex-row sm:items-center">
+								<form
+									method="POST"
+									class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center"
+									enctype="application/x-www-form-urlencoded"
+									data-astro-reload
+								>
+									<input type="hidden" name="action" value="rename" />
+									<input type="hidden" name="slug" value={cat.slug} />
+									<div class="flex min-w-0 flex-1 items-center gap-2">
+										<Badge variant="outline">{cat.slug}</Badge>
+										<Input name="label" value={cat.label} required disabled={!canWrite} />
+									</div>
+									<Button type="submit" variant="outline" size="sm" disabled={!canWrite}>
+										Renombrar
+									</Button>
+								</form>
+								<form method="POST" enctype="application/x-www-form-urlencoded" data-astro-reload>
+									<input type="hidden" name="action" value="delete" />
+									<input type="hidden" name="slug" value={cat.slug} />
+									<Button type="submit" variant="ghost" size="sm" disabled={!canWrite}>
+										Eliminar
+									</Button>
+								</form>
+							</div>
+						))
+					)
+				}
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>

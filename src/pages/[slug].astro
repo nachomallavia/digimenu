@@ -1,7 +1,7 @@
 ---
 import { getEmDashEntry, getSeoMeta, decodeSlug, getSiteSettings } from "emdash";
 import { PortableText } from "emdash/ui";
-import Base from "../layouts/Base.astro";
+import Menu from "../layouts/Menu.astro";
 import { resolveStarterSiteIdentity } from "../utils/site-identity";
 
 const slug = decodeSlug(Astro.params.slug);
@@ -26,7 +26,7 @@ const seo = getSeoMeta(page, {
 });
 ---
 
-<Base
+<Menu
 	title={seo.title}
 	pageTitle={seo.ogTitle}
 	description={seo.description}
@@ -38,4 +38,4 @@ const seo = getSeoMeta(page, {
 
 		<PortableText value={page.data.content} />
 	</article>
-</Base>
+</Menu>

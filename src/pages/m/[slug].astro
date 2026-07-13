@@ -1,0 +1,321 @@
+---
+import {
+	createEditable,
+	getEmDashCollection,
+	getEmDashEntry,
+	getEntryTerms,
+	getTaxonomyTerms,
+} from "emdash";
+import { Image } from "emdash/ui";
+import Menu from "../../layouts/Menu.astro";
+import { parseMenuLayout } from "../../lib/menu-layout";
+import { parseRestaurantTheme } from "../../lib/restaurant-theme";
+
+const { slug } = Astro.params;
+if (!slug) {
+	return Astro.redirect("/404");
+}
+
+const { entry: restaurante, cacheHint: restaurantHint } = await getEmDashEntry(
+	"restaurantes",
+	slug,
+);
+
+if (!restaurante) {
+	return Astro.redirect("/404");
+}
+
+const restaurantId = restaurante.data.id;
+const layout = parseMenuLayout(
+	(restaurante.data as { menu_layout?: unknown }).menu_layout,
+);
+const theme = parseRestaurantTheme((restaurante.data as { theme?: unknown }).theme);
+
+const { entries: productosRaw, cacheHint: productsHint } = await getEmDashCollection(
+	"productos",
+	{
+		where: { restaurante: restaurantId },
+		limit: 200,
+	},
+);
+
+// EmDash's collection L2 path always reviveEntry()'s with createNoop(), so
+// `{...item.edit.*}` is inert for list queries even in visual edit mode.
+// Re-attach editable proxies only for authenticated editors with Edit ON.
+const editor = Astro.locals.user;
+const isEditor = !!editor && editor.role >= 30;
+const editMode =
+	isEditor && Astro.cookies.get("emdash-edit-mode")?.value === "true";
+
+const productos = editMode
+	? productosRaw.map((entry) => {
+			const data = entry.data as {
+				id: string;
+				status?: string;
+				draftRevisionId?: string | null;
+				liveRevisionId?: string | null;
+			};
+			const hasDraft =
+				!!data.draftRevisionId && data.draftRevisionId !== data.liveRevisionId;
+			return {
+				...entry,
+				edit: createEditable("productos", data.id, {
+					status: data.status ?? "draft",
+					hasDraft,
+				}),
+			};
+		})
+	: productosRaw;
+
+const categorias = await getTaxonomyTerms("categoria");
+
+type MenuItem = (typeof productos)[number];
+type Section = { slug: string; label: string; items: MenuItem[] };
+
+const byCategory = new Map<string, MenuItem[]>();
+const uncategorized: MenuItem[] = [];
+
+for (const producto of productos) {
+	const terms = await getEntryTerms("productos", producto.data.id, "categoria");
+	if (terms.length === 0) {
+		uncategorized.push(producto);
+		continue;
+	}
+	for (const term of terms) {
+		const list = byCategory.get(term.slug) ?? [];
+		list.push(producto);
+		byCategory.set(term.slug, list);
+	}
+}
+
+const sections: Section[] = [];
+for (const term of categorias) {
+	const items = byCategory.get(term.slug);
+	if (items?.length) {
+		sections.push({ slug: term.slug, label: term.label, items });
+		byCategory.delete(term.slug);
+	}
+}
+for (const [termSlug, items] of byCategory) {
+	sections.push({ slug: termSlug, label: termSlug, items });
+}
+if (uncategorized.length) {
+	sections.push({ slug: "sin-categoria", label: "Sin categoría", items: uncategorized });
+}
+
+const flatItems: MenuItem[] =
+	layout.navigation === "scroll_unico"
+		? sections.flatMap((s) => s.items)
+		: [];
+
+const priceFmt = new Intl.NumberFormat("es-AR", {
+	style: "currency",
+	currency: "ARS",
+	maximumFractionDigits: 0,
+});
+
+if (Astro.cache?.enabled) {
+	Astro.cache.set(restaurantHint);
+	Astro.cache.set(productsHint);
+}
+
+const listClass =
+	layout.columns === 2 ? "menu-list menu-list--cols-2" : "menu-list";
+---
+
+<Menu
+	title={restaurante.data.nombre}
+	description={restaurante.data.descripcion}
+	content={{ collection: "restaurantes", id: restaurantId, slug: restaurante.id }}
+	restaurantSlug={restaurante.id}
+	theme={theme}
+>
+	<article class="menu">
+		<header class="menu-header">
+			{
+				restaurante.data.logo && (
+					<div {...restaurante.edit.logo}>
+						<Image image={restaurante.data.logo} class="menu-logo" />
+					</div>
+				)
+			}
+			<h1 {...restaurante.edit.nombre}>{restaurante.data.nombre}</h1>
+			{
+				restaurante.data.descripcion && (
+					<p class="menu-desc" {...restaurante.edit.descripcion}>
+						{restaurante.data.descripcion}
+					</p>
+				)
+			}
+			{
+				layout.navigation === "por_categorias" && sections.length > 1 && (
+					<nav class="menu-toc" aria-label="Categorías">
+						{sections.map((section) => (
+							<a href={`#${section.slug}`}>{section.label}</a>
+						))}
+					</nav>
+				)
+			}
+		</header>
+
+		{
+			productos.length === 0 ? (
+				<p>Todavía no hay productos en este menú.</p>
+			) : layout.navigation === "scroll_unico" ? (
+				<ul class={listClass}>
+					{flatItems.map((item) => (
+						<li class="menu-item">
+							{layout.showImages && item.data.imagen && (
+								<div {...item.edit.imagen}>
+									<Image image={item.data.imagen} class="menu-item-image" />
+								</div>
+							)}
+							<div class="menu-item-body">
+								<div class="menu-item-row">
+									<h3 {...item.edit.nombre}>{item.data.nombre}</h3>
+									<span class="menu-price" {...item.edit.precio}>
+										{priceFmt.format(item.data.precio)}
+									</span>
+								</div>
+								{item.data.descripcion && (
+									<p {...item.edit.descripcion}>{item.data.descripcion}</p>
+								)}
+							</div>
+						</li>
+					))}
+				</ul>
+			) : (
+				sections.map((section) => (
+					<section class="menu-section" id={section.slug}>
+						<h2>{section.label}</h2>
+						<ul class={listClass}>
+							{section.items.map((item) => (
+								<li class="menu-item">
+									{layout.showImages && item.data.imagen && (
+										<div {...item.edit.imagen}>
+											<Image image={item.data.imagen} class="menu-item-image" />
+										</div>
+									)}
+									<div class="menu-item-body">
+										<div class="menu-item-row">
+											<h3 {...item.edit.nombre}>{item.data.nombre}</h3>
+											<span class="menu-price" {...item.edit.precio}>
+												{priceFmt.format(item.data.precio)}
+											</span>
+										</div>
+										{item.data.descripcion && (
+											<p {...item.edit.descripcion}>{item.data.descripcion}</p>
+										)}
+									</div>
+								</li>
+							))}
+						</ul>
+					</section>
+				))
+			)
+		}
+	</article>
+</Menu>
+
+<style>
+	.menu {
+		max-width: 40rem;
+		margin: 0 auto;
+		padding: 1.5rem 1rem 3rem;
+	}
+	.menu:has(.menu-list--cols-2) {
+		max-width: 56rem;
+	}
+	.menu-header {
+		margin-bottom: 2rem;
+	}
+	.menu-logo {
+		max-height: 4rem;
+		width: auto;
+		margin-bottom: 0.75rem;
+		border-radius: var(--radius, 0.625rem);
+	}
+	.menu-desc {
+		opacity: 0.8;
+	}
+	.menu-toc {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1rem;
+		margin-top: 1rem;
+		font-size: 0.875rem;
+	}
+	.menu-toc a {
+		color: var(--primary, currentColor);
+		text-decoration: none;
+	}
+	.menu-toc a:hover {
+		text-decoration: underline;
+	}
+	.menu-section {
+		margin-bottom: 2rem;
+		scroll-margin-top: 1rem;
+	}
+	.menu-section h2 {
+		font-size: 1rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		border-bottom: 1px solid var(--border, currentColor);
+		padding-bottom: 0.35rem;
+		margin-bottom: 1rem;
+	}
+	.menu-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.menu-list--cols-2 {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 1rem;
+	}
+	@media (min-width: 640px) {
+		.menu-list--cols-2 {
+			grid-template-columns: 1fr 1fr;
+		}
+	}
+	.menu-item {
+		display: flex;
+		gap: 0.75rem;
+		align-items: flex-start;
+	}
+	.menu-item-image {
+		width: 4rem;
+		height: 4rem;
+		object-fit: cover;
+		flex-shrink: 0;
+		border-radius: var(--radius, 0.625rem);
+	}
+	.menu-item-body {
+		flex: 1;
+		min-width: 0;
+	}
+	.menu-item-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: baseline;
+	}
+	.menu-item-row h3 {
+		margin: 0;
+		font-size: 1.05rem;
+	}
+	.menu-price {
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+		color: var(--primary, inherit);
+	}
+	.menu-item-body p {
+		margin: 0.25rem 0 0;
+		opacity: 0.75;
+		font-size: 0.95rem;
+	}
+</style>

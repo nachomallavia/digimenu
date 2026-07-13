@@ -1,48 +1,63 @@
 ---
 import { getEmDashCollection, getSiteSettings } from "emdash";
 import { Image } from "emdash/ui";
-import Base from "../layouts/Base.astro";
+import Menu from "../layouts/Menu.astro";
 import { resolveStarterSiteIdentity } from "../utils/site-identity";
 
-const { entries: posts, cacheHint } = await getEmDashCollection("posts", {
-	orderBy: { published_at: "desc" },
+const { entries: restaurantes, cacheHint } = await getEmDashCollection("restaurantes", {
+	orderBy: { created_at: "desc" },
+	limit: 50,
 });
 const { siteTitle, siteTagline } = resolveStarterSiteIdentity(await getSiteSettings());
 if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 ---
 
-<Base title={siteTitle} description={siteTagline}>
-	<h1>Recent Posts</h1>
+<Menu title={siteTitle} description={siteTagline}>
+	<h1>{siteTitle}</h1>
+	{siteTagline && <p>{siteTagline}</p>}
 
 	{
-		posts.length === 0 ? (
+		restaurantes.length === 0 ? (
 			<p>
-				No posts yet.{" "}
-				<a href="/_emdash/admin/content/posts/new">Create one</a>.
+				No hay restaurantes todavía.{" "}
+				<a href="/_emdash/admin/content/restaurantes/new">Crear uno</a>.
 			</p>
 		) : (
-			<ul>
-				{posts.map((post) => (
+			<ul class="restaurant-list">
+				{restaurantes.map((r) => (
 					<li>
-						<a href={`/posts/${post.id}`}>
-							{post.data.featured_image && (
-								<Image image={post.data.featured_image} />
-							)}
-							<h2>{post.data.title}</h2>
+						<a href={`/m/${r.id}`}>
+							{r.data.logo && <Image image={r.data.logo} />}
+							<span>{r.data.nombre}</span>
 						</a>
-						{post.data.excerpt && <p>{post.data.excerpt}</p>}
-						{post.data.publishedAt && (
-							<time datetime={post.data.publishedAt.toISOString()}>
-								{post.data.publishedAt.toLocaleDateString("en-US", {
-									year: "numeric",
-									month: "long",
-									day: "numeric",
-								})}
-							</time>
-						)}
+						{r.data.descripcion && <p>{r.data.descripcion}</p>}
 					</li>
 				))}
 			</ul>
 		)
 	}
-</Base>
+</Menu>
+
+<style>
+	.restaurant-list {
+		list-style: none;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+	}
+	.restaurant-list a {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 1.25rem;
+	}
+	.restaurant-list img {
+		height: 2.5rem;
+		width: auto;
+	}
+	.restaurant-list p {
+		margin: 0.25rem 0 0;
+		opacity: 0.75;
+	}
+</style>

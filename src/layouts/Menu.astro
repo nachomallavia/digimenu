@@ -1,0 +1,127 @@
+---
+/**
+ * Public DigiMenu chrome (customer-facing).
+ * Optional `theme` CSS vars apply on `.menu-shell` for per-restaurant theming.
+ */
+import { getSiteSettings } from "emdash";
+import {
+	EmDashHead,
+	EmDashBodyStart,
+	EmDashBodyEnd,
+} from "emdash/ui";
+import { createPublicPageContext } from "emdash/page";
+import { resolveStarterSiteIdentity } from "../utils/site-identity";
+import {
+	googleFontsHref,
+	restaurantThemeStyle,
+	type RestaurantTheme,
+} from "../lib/restaurant-theme";
+import Root from "./Root.astro";
+
+interface Props {
+	title: string;
+	pageTitle?: string | null;
+	description?: string | null;
+	image?: string | null;
+	canonical?: string | null;
+	content?: { collection: string; id: string; slug?: string | null };
+	/** Restaurant slug for `data-restaurant` (theming hook). */
+	restaurantSlug?: string | null;
+	/** Parsed restaurant theme (Starwind-inspired tokens). */
+	theme?: RestaurantTheme | null;
+	/** Hide the site header (e.g. full-bleed restaurant menu). Default false. */
+	hideChrome?: boolean;
+}
+
+const {
+	title,
+	pageTitle,
+	description,
+	image,
+	canonical,
+	content,
+	restaurantSlug,
+	theme,
+	hideChrome = false,
+} = Astro.props;
+
+const { siteTitle, siteTagline, siteLogo } = resolveStarterSiteIdentity(
+	await getSiteSettings(),
+);
+const fullTitle = title.includes(siteTitle) ? title : `${title} — ${siteTitle}`;
+const pageDescription = description ?? siteTagline;
+const themeStyle = theme ? restaurantThemeStyle(theme) : undefined;
+const fontsHref = theme ? googleFontsHref(theme) : null;
+const darkClass = theme?.mode === "dark" ? "dark" : undefined;
+
+const pageCtx = createPublicPageContext({
+	Astro,
+	kind: content ? "content" : "custom",
+	pageType: "website",
+	title: fullTitle,
+	pageTitle: pageTitle ?? title,
+	description: pageDescription,
+	canonical,
+	image,
+	content,
+	siteName: siteTitle,
+});
+---
+
+<Root title={fullTitle} description={pageDescription} canonical={canonical} lang="es">
+	<EmDashHead slot="head" page={pageCtx} />
+	{
+		fontsHref && (
+			<link
+				slot="head"
+				rel="stylesheet"
+				href={fontsHref}
+			/>
+		)
+	}
+
+	<EmDashBodyStart page={pageCtx} />
+
+	<div
+		class:list={["menu-shell min-h-screen bg-background text-foreground", darkClass]}
+		data-restaurant={restaurantSlug || undefined}
+		style={themeStyle}
+	>
+		{
+			!hideChrome && (
+				<header class="border-b border-border">
+					<nav class="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3">
+						<a href="/" class="font-semibold text-foreground">
+							{siteLogo ? (
+								<img
+									src={siteLogo.url}
+									alt={siteLogo.alt || siteTitle}
+									class="my-[-8px] block h-12 w-auto"
+								/>
+							) : (
+								siteTitle
+							)}
+						</a>
+					</nav>
+				</header>
+			)
+		}
+
+		<main class="mx-auto max-w-5xl px-4 py-6">
+			<slot />
+		</main>
+	</div>
+
+	<EmDashBodyEnd page={pageCtx} />
+</Root>
+
+<style is:global>
+	.menu-shell {
+		font-family: var(--font-body, ui-sans-serif, system-ui, sans-serif);
+	}
+	.menu-shell h1,
+	.menu-shell h2,
+	.menu-shell h3 {
+		font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+	}
+</style>

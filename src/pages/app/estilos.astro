@@ -1,0 +1,257 @@
+---
+import Dashboard from "../../layouts/Dashboard.astro";
+import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
+import { updateRestauranteViaApi, writesEnabled } from "../../lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
+import {
+	DEFAULT_RESTAURANT_THEME,
+	FONT_OPTIONS,
+	parseRestaurantTheme,
+	type ThemeMode,
+	type ThemeRadius,
+} from "../../lib/restaurant-theme";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const canWrite = writesEnabled();
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const mode = (String(form.get("mode") ?? "light") === "dark" ? "dark" : "light") as ThemeMode;
+	const radiusRaw = String(form.get("radius") ?? "md");
+	const radius = (
+		["none", "sm", "md", "lg"].includes(radiusRaw) ? radiusRaw : "md"
+	) as ThemeRadius;
+
+	const themePayload = {
+		mode,
+		primary: String(form.get("primary") ?? DEFAULT_RESTAURANT_THEME.primary),
+		background: String(form.get("background") ?? DEFAULT_RESTAURANT_THEME.background),
+		foreground: String(form.get("foreground") ?? DEFAULT_RESTAURANT_THEME.foreground),
+		muted: String(form.get("muted") ?? DEFAULT_RESTAURANT_THEME.muted),
+		border: String(form.get("border") ?? DEFAULT_RESTAURANT_THEME.border),
+		radius,
+		fontDisplay: String(form.get("fontDisplay") ?? "system-sans"),
+		fontBody: String(form.get("fontBody") ?? "system-sans"),
+	};
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, {
+				theme: themePayload,
+			});
+			await revalidateOwnerSession(Astro.request, Astro.cookies);
+			return Astro.redirect(savedRedirect("/app/estilos"));
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo guardar";
+		}
+	}
+}
+
+const restaurant = await loadOwnerRestaurant(owner);
+const theme = parseRestaurantTheme(restaurant.entry?.data.theme);
+
+const colorFields = [
+	{ name: "primary", label: "Primario", value: theme.primary },
+	{ name: "background", label: "Fondo", value: theme.background },
+	{ name: "foreground", label: "Texto", value: theme.foreground },
+	{ name: "muted", label: "Texto suave", value: theme.muted },
+	{ name: "border", label: "Bordes", value: theme.border },
+] as const;
+---
+
+<Dashboard
+	title="DigiMenu — Estilos"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight">Estilos</h1>
+			<p class="text-muted-foreground">
+				Tokens del menú público (inspirados en Starwind, simplificados). El panel DigiMenu no
+				cambia.
+			</p>
+		</div>
+
+		{saved && <p class="text-sm text-success">Guardado. Abrí “Ver menú” para ver el tema.</p>}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Tema del menú</CardTitle>
+				<CardDescription>
+					Modo, colores, tipografías y redondeo aplicados en{" "}
+					<code>/m/{restaurant.slug}</code>.
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-5" enctype="application/x-www-form-urlencoded" data-astro-reload>
+					<fieldset class="flex flex-col gap-2">
+						<Label>Modo base</Label>
+						<div class="flex gap-4">
+							<label class="flex items-center gap-2 text-sm">
+								<input
+									type="radio"
+									name="mode"
+									value="light"
+									checked={theme.mode === "light"}
+									disabled={!canWrite}
+								/>
+								Claro
+							</label>
+							<label class="flex items-center gap-2 text-sm">
+								<input
+									type="radio"
+									name="mode"
+									value="dark"
+									checked={theme.mode === "dark"}
+									disabled={!canWrite}
+								/>
+								Oscuro
+							</label>
+						</div>
+					</fieldset>
+
+					<div class="grid gap-4 sm:grid-cols-2">
+						{
+							colorFields.map((field) => (
+								<div class="flex flex-col gap-1.5">
+									<Label for={field.name}>{field.label}</Label>
+									<div class="flex items-center gap-2" data-color-field={field.name}>
+										<input
+											type="color"
+											data-swatch
+											value={field.value}
+											class="size-10 cursor-pointer rounded border border-border bg-transparent p-0.5"
+											disabled={!canWrite}
+										/>
+										<Input
+											id={field.name}
+											name={field.name}
+											data-hex
+											value={field.value}
+											disabled={!canWrite}
+										/>
+									</div>
+								</div>
+							))
+						}
+					</div>
+
+					<div class="grid gap-4 sm:grid-cols-2">
+						<div class="flex flex-col gap-1.5">
+							<Label for="fontDisplay">Tipografía títulos</Label>
+							<select
+								id="fontDisplay"
+								name="fontDisplay"
+								class="border-input bg-background h-11 rounded-md border px-3 text-sm"
+								disabled={!canWrite}
+							>
+								{
+									FONT_OPTIONS.map((f) => (
+										<option value={f.id} selected={theme.fontDisplay === f.id}>
+											{f.label}
+										</option>
+									))
+								}
+							</select>
+						</div>
+						<div class="flex flex-col gap-1.5">
+							<Label for="fontBody">Tipografía cuerpo</Label>
+							<select
+								id="fontBody"
+								name="fontBody"
+								class="border-input bg-background h-11 rounded-md border px-3 text-sm"
+								disabled={!canWrite}
+							>
+								{
+									FONT_OPTIONS.map((f) => (
+										<option value={f.id} selected={theme.fontBody === f.id}>
+											{f.label}
+										</option>
+									))
+								}
+							</select>
+						</div>
+					</div>
+
+					<fieldset class="flex flex-col gap-2">
+						<Label>Redondeo</Label>
+						<div class="flex flex-wrap gap-3">
+							{
+								(["none", "sm", "md", "lg"] as const).map((r) => (
+									<label class="flex items-center gap-2 text-sm">
+										<input
+											type="radio"
+											name="radius"
+											value={r}
+											checked={theme.radius === r}
+											disabled={!canWrite}
+										/>
+										{r}
+									</label>
+								))
+							}
+						</div>
+					</fieldset>
+
+					<div
+						class:list={["rounded-lg border p-4", theme.mode === "dark" && "dark"]}
+						style={`background:${theme.background};color:${theme.foreground};border-color:${theme.border};border-radius:var(--preview-radius,0.625rem);--preview-radius:${theme.radius === "none" ? "0" : theme.radius === "sm" ? "0.25rem" : theme.radius === "lg" ? "1rem" : "0.625rem"}`}
+					>
+						<p class="text-xs uppercase tracking-wide" style={`color:${theme.muted}`}>
+							Vista previa
+						</p>
+						<p class="mt-1 text-lg font-semibold" style={`color:${theme.primary}`}>
+							{restaurant.name}
+						</p>
+						<p class="mt-1 text-sm" style={`color:${theme.muted}`}>
+							Así se sentirán tipografías y colores en el menú.
+						</p>
+					</div>
+
+					<div>
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Guardar estilos
+						</Button>
+					</div>
+				</form>
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>
+
+<script>
+	function bindColorFields() {
+		document.querySelectorAll<HTMLElement>("[data-color-field]").forEach((wrap) => {
+			const swatch = wrap.querySelector<HTMLInputElement>("[data-swatch]");
+			const hex = wrap.querySelector<HTMLInputElement>("[data-hex]");
+			if (!swatch || !hex || wrap.dataset.bound === "1") return;
+			wrap.dataset.bound = "1";
+			swatch.addEventListener("input", () => {
+				hex.value = swatch.value;
+			});
+			hex.addEventListener("change", () => {
+				if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) swatch.value = hex.value;
+			});
+		});
+	}
+	bindColorFields();
+	document.addEventListener("astro:page-load", bindColorFields);
+</script>

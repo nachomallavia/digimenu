@@ -18,14 +18,31 @@ export interface Page {
   terms?: Record<string, TaxonomyTerm[]>;
 }
 
-export interface Post {
+export interface Producto {
   id: string;
   slug: string | null;
   status: string;
-  title: string;
-  featured_image?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
-  content?: PortableTextBlock[];
-  excerpt?: string;
+  nombre: string;
+  descripcion?: string;
+  precio: number;
+  imagen?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
+  restaurante?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt: Date | null;
+  bylines?: ContentBylineCredit[];
+  terms?: Record<string, TaxonomyTerm[]>;
+}
+
+export interface Restaurante {
+  id: string;
+  slug: string | null;
+  status: string;
+  nombre: string;
+  descripcion?: string;
+  logo?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
+  menu_layout?: unknown;
+  theme?: unknown;
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;
@@ -36,6 +53,7 @@ export interface Post {
 declare module "emdash" {
   interface EmDashCollections {
     pages: Page;
-    posts: Post;
+    productos: Producto;
+    restaurantes: Restaurante;
   }
 }

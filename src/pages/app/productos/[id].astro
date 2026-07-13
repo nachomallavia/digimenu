@@ -1,0 +1,200 @@
+---
+import Dashboard from "../../../layouts/Dashboard.astro";
+import { requireOwner, revalidateOwnerSession } from "../../../lib/auth/require-owner";
+import {
+	assertProductoBelongsToRestaurant,
+	deleteProductoViaApi,
+	getProductoBySlug,
+	getProductoCategorias,
+	listCategorias,
+	setProductoCategoriasViaApi,
+	updateProductoViaApi,
+	writesEnabled,
+} from "../../../lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "../../../lib/emdash/owner-restaurant";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Textarea } from "@/components/starwind/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const canWrite = writesEnabled();
+const slug = Astro.params.id;
+if (!slug) {
+	return Astro.redirect("/app/productos");
+}
+
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+
+const { entry: producto } = await getProductoBySlug(slug);
+
+if (!producto || !assertProductoBelongsToRestaurant(producto, owner.restaurant.emdash_restaurant_id)) {
+	return Astro.redirect("/app/productos");
+}
+
+const categorias = await listCategorias();
+let selected = await getProductoCategorias(producto.data.id);
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const action = String(form.get("action") ?? "save");
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (action === "delete") {
+				await deleteProductoViaApi(producto.data.id);
+				await revalidateOwnerSession(Astro.request, Astro.cookies);
+				return Astro.redirect("/app/productos");
+			}
+
+			const nombre = String(form.get("nombre") ?? "").trim();
+			const precio = Number(form.get("precio"));
+			const descripcion = String(form.get("descripcion") ?? "").trim();
+			const termIds = form.getAll("categoria").map(String);
+
+			if (!nombre || Number.isNaN(precio)) {
+				throw new Error("Nombre y precio válidos son obligatorios.");
+			}
+
+			await updateProductoViaApi(producto.data.id, {
+				nombre,
+				precio,
+				descripcion: descripcion || null,
+			});
+			await setProductoCategoriasViaApi(producto.data.id, termIds);
+			await revalidateOwnerSession(Astro.request, Astro.cookies);
+			return Astro.redirect(savedRedirect(`/app/productos/${slug}`));
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo guardar";
+		}
+	}
+}
+
+// Re-read after failed POST so form reflects DB; on success we redirected.
+const refreshed = await getProductoBySlug(slug);
+const current = refreshed.entry ?? producto;
+selected = await getProductoCategorias(current.data.id);
+const selectedIds = new Set(selected.map((c) => c.id));
+---
+
+<Dashboard
+	title={`DigiMenu — ${current.data.nombre}`}
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<p class="mb-1 text-sm">
+				<a href="/app/productos" class="text-muted-foreground hover:text-foreground">
+					← Productos
+				</a>
+			</p>
+			<h1 class="text-2xl font-semibold tracking-tight">Detalle de producto</h1>
+			<p class="text-muted-foreground">
+				Slug <code class="text-sm">{current.id}</code>
+			</p>
+		</div>
+
+		{saved && <p class="text-sm text-success">Producto actualizado.</p>}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Editar</CardTitle>
+				<CardDescription>
+					La imagen se gestiona por ahora desde EmDash media (próxima iteración).
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-4" enctype="application/x-www-form-urlencoded" data-astro-reload>
+					<input type="hidden" name="action" value="save" />
+					<div class="flex flex-col gap-1.5">
+						<Label for="nombre">Nombre</Label>
+						<Input
+							id="nombre"
+							name="nombre"
+							required
+							value={current.data.nombre}
+							disabled={!canWrite}
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="precio">Precio</Label>
+						<Input
+							id="precio"
+							name="precio"
+							type="number"
+							min="0"
+							step="1"
+							required
+							value={String(current.data.precio)}
+							disabled={!canWrite}
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="descripcion">Descripción</Label>
+						<Textarea id="descripcion" name="descripcion" rows={4} disabled={!canWrite}>
+							{current.data.descripcion ?? ""}
+						</Textarea>
+					</div>
+
+					<fieldset class="flex flex-col gap-2">
+						<Label>Categorías</Label>
+						{
+							categorias.length === 0 ? (
+								<p class="text-sm text-muted-foreground">
+									No hay categorías. Creá alguna en{" "}
+									<a href="/app/categorias" class="underline">
+										Categorías
+									</a>
+									.
+								</p>
+							) : (
+								<div class="flex flex-col gap-2">
+									{categorias.map((cat) => (
+										<label class="flex items-center gap-2 text-sm">
+											<input
+												type="checkbox"
+												name="categoria"
+												value={cat.id}
+												checked={selectedIds.has(cat.id)}
+												disabled={!canWrite}
+											/>
+											{cat.label}
+										</label>
+									))}
+								</div>
+							)
+						}
+					</fieldset>
+
+					<div class="flex flex-wrap gap-2">
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Guardar
+						</Button>
+					</div>
+				</form>
+
+				<form method="POST" class="mt-6 border-t border-border pt-4" enctype="application/x-www-form-urlencoded" data-astro-reload>
+					<input type="hidden" name="action" value="delete" />
+					<Button type="submit" variant="error" size="sm" disabled={!canWrite}>
+						Eliminar producto
+					</Button>
+				</form>
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>

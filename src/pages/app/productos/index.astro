@@ -1,0 +1,162 @@
+---
+import Dashboard from "../../../layouts/Dashboard.astro";
+import { requireOwner, revalidateOwnerSession } from "../../../lib/auth/require-owner";
+import {
+	createProductoViaApi,
+	getProductoCategorias,
+	listProductosForRestaurant,
+	writesEnabled,
+} from "../../../lib/emdash/client";
+import { loadOwnerRestaurant } from "../../../lib/emdash/owner-restaurant";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const canWrite = writesEnabled();
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const nombre = String(form.get("nombre") ?? "").trim();
+	const precio = Number(form.get("precio"));
+	const descripcion = String(form.get("descripcion") ?? "").trim();
+
+	if (!nombre || Number.isNaN(precio)) {
+		error = "Nombre y precio válidos son obligatorios.";
+	} else if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			const created = await createProductoViaApi({
+				nombre,
+				precio,
+				descripcion: descripcion || undefined,
+				restauranteId: owner.restaurant.emdash_restaurant_id,
+			});
+			await revalidateOwnerSession(Astro.request, Astro.cookies);
+			return Astro.redirect(`/app/productos/${created.item.slug ?? created.item.id}`);
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo crear";
+		}
+	}
+}
+
+type Row = {
+	slug: string;
+	id: string;
+	nombre: string;
+	precio: number;
+	categorias: string[];
+};
+
+let rows: Row[] = [];
+try {
+	const { entries } = await listProductosForRestaurant(
+		owner.restaurant.emdash_restaurant_id,
+	);
+	rows = await Promise.all(
+		entries.map(async (p) => {
+			const cats = await getProductoCategorias(p.data.id);
+			return {
+				slug: p.id,
+				id: p.data.id,
+				nombre: p.data.nombre,
+				precio: p.data.precio,
+				categorias: cats.map((c) => c.label),
+			};
+		}),
+	);
+} catch (err) {
+	error = error ?? (err instanceof Error ? err.message : "Error al listar productos");
+}
+
+const priceFmt = new Intl.NumberFormat("es-AR", {
+	style: "currency",
+	currency: "ARS",
+	maximumFractionDigits: 0,
+});
+---
+
+<Dashboard
+	title="DigiMenu — Productos"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-3xl flex-col gap-6">
+		<div class="flex flex-wrap items-end justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Productos</h1>
+				<p class="text-muted-foreground">Items del menú de tu restaurante.</p>
+			</div>
+		</div>
+
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Nuevo producto</CardTitle>
+				<CardDescription>Después podés asignar categoría e imagen en el detalle.</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="grid gap-3 sm:grid-cols-[1fr_8rem_auto]" enctype="application/x-www-form-urlencoded" data-astro-reload>
+					<div class="flex flex-col gap-1.5">
+						<Label for="nombre">Nombre</Label>
+						<Input id="nombre" name="nombre" required disabled={!canWrite} />
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="precio">Precio</Label>
+						<Input id="precio" name="precio" type="number" min="0" step="1" required disabled={!canWrite} />
+					</div>
+					<div class="flex items-end">
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Crear
+						</Button>
+					</div>
+					<input type="hidden" name="descripcion" value="" />
+				</form>
+			</CardContent>
+		</Card>
+
+		<div class="overflow-hidden rounded-lg border border-border">
+			{
+				rows.length === 0 ? (
+					<p class="px-4 py-6 text-sm text-muted-foreground">No hay productos publicados.</p>
+				) : (
+					<ul class="divide-y divide-border">
+						{rows.map((row) => (
+							<li>
+								<a
+									href={`/app/productos/${row.slug}`}
+									class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50"
+								>
+									<span class="min-w-0">
+										<span class="block truncate font-medium">{row.nombre}</span>
+										{row.categorias.length > 0 && (
+											<span class="text-xs text-muted-foreground">
+												{row.categorias.join(" · ")}
+											</span>
+										)}
+									</span>
+									<span class="shrink-0 tabular-nums text-muted-foreground">
+										{priceFmt.format(row.precio)}
+									</span>
+								</a>
+							</li>
+						))}
+					</ul>
+				)
+			}
+		</div>
+	</div>
+</Dashboard>

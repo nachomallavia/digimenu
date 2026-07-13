@@ -1,0 +1,32 @@
+---
+/**
+ * Shared DigiMenu document shell (HTML + Starwind defaults).
+ * Restaurant theming belongs in Menu.astro — not here.
+ * EmDash `/_emdash/admin` does not use this layout.
+ */
+import "../styles/starwind.css";
+
+interface Props {
+	title: string;
+	description?: string | null;
+	canonical?: string | null;
+	lang?: string;
+}
+
+const { title, description, canonical, lang = "es" } = Astro.props;
+---
+
+<!doctype html>
+<html lang={lang}>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{title}</title>
+		{description && <meta name="description" content={description} />}
+		{canonical && <link rel="canonical" href={canonical} />}
+		<slot name="head" />
+	</head>
+	<body class="bg-background text-foreground">
+		<slot />
+	</body>
+</html>

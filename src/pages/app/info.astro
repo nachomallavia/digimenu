@@ -1,0 +1,108 @@
+---
+import Dashboard from "../../layouts/Dashboard.astro";
+import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
+import { updateRestauranteViaApi, writesEnabled } from "../../lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Textarea } from "@/components/starwind/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+let owner = auth.owner;
+const canWrite = writesEnabled();
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const nombre = String(form.get("nombre") ?? "").trim();
+	const descripcion = String(form.get("descripcion") ?? "").trim();
+
+	if (!nombre) {
+		error = "El nombre es obligatorio.";
+	} else if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, {
+				nombre,
+				descripcion: descripcion || null,
+			});
+			await revalidateOwnerSession(Astro.request, Astro.cookies);
+			return Astro.redirect(savedRedirect("/app/info"));
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo guardar";
+		}
+	}
+}
+
+const restaurant = await loadOwnerRestaurant(owner);
+if (!restaurant.entry) {
+	error = error ?? "No se encontró el restaurante en EmDash.";
+}
+
+const nombre = restaurant.entry?.data.nombre ?? owner.restaurantName;
+const descripcion = restaurant.entry?.data.descripcion ?? "";
+---
+
+<Dashboard
+	title="DigiMenu — Info"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight">Info restaurante</h1>
+			<p class="text-muted-foreground">Nombre, descripción y datos visibles en el menú público.</p>
+		</div>
+
+		{
+			saved && (
+				<p class="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success-foreground">
+					Guardado.
+				</p>
+			)
+		}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Datos básicos</CardTitle>
+				<CardDescription>
+					El logo se gestiona por ahora desde EmDash admin / media (próxima iteración).
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-4" enctype="application/x-www-form-urlencoded" data-astro-reload>
+					<div class="flex flex-col gap-1.5">
+						<Label for="nombre">Nombre</Label>
+						<Input id="nombre" name="nombre" required value={nombre} disabled={!canWrite} />
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="descripcion">Descripción</Label>
+						<Textarea
+							id="descripcion"
+							name="descripcion"
+							rows={4}
+							disabled={!canWrite}
+						>{descripcion}</Textarea>
+					</div>
+					<div>
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Guardar
+						</Button>
+					</div>
+				</form>
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>

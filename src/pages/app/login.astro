@@ -1,0 +1,66 @@
+---
+import AppGuest from "../../layouts/AppGuest.astro";
+import { createSupabaseServerClient } from "../../lib/supabase/server";
+
+export const prerender = false;
+
+const supabase = createSupabaseServerClient(Astro.request, Astro.cookies);
+const {
+	data: { user },
+} = await supabase.auth.getUser();
+
+if (user) {
+	return Astro.redirect("/app");
+}
+
+const sent = Astro.url.searchParams.get("sent") === "1";
+const error = Astro.url.searchParams.get("error");
+---
+
+<AppGuest title="DigiMenu — Ingresar">
+	<h1 class="mb-2 text-2xl font-semibold">Ingresar</h1>
+	<p class="mb-6 text-muted-foreground">
+		Ingresá con tu email. Te mandamos un magic link.
+	</p>
+
+	{
+		sent && (
+			<p class="mb-4 text-success">
+				Revisá tu correo y abrí el enlace para entrar.
+			</p>
+		)
+	}
+	{
+		error && (
+			<p class="mb-4 text-error">
+				{error === "auth"
+					? "No se pudo completar el login. Probá de nuevo."
+					: "Ocurrió un error. Probá de nuevo."}
+			</p>
+		)
+	}
+
+	<form method="POST" action="/app/auth/magic-link" class="flex flex-col gap-4">
+		<label class="flex flex-col gap-1.5">
+			<span class="text-sm">Email</span>
+			<input
+				type="email"
+				name="email"
+				required
+				autocomplete="email"
+				class="rounded-md border border-border bg-background px-3 py-2 text-base"
+			/>
+		</label>
+		<button
+			type="submit"
+			class="cursor-pointer rounded-md bg-primary px-4 py-2.5 text-primary-foreground"
+		>
+			Enviar magic link
+		</button>
+	</form>
+
+	<p class="mt-8 text-sm text-muted-foreground">
+		Más adelante vas a poder entrar con Google, Facebook, etc. El mapping al
+		restaurante no cambia.
+	</p>
+</AppGuest>
