@@ -13,7 +13,7 @@ Post-parity polish: Worker taxonomy `categoria` (admin) + secrets for `/app` wri
 - EmDash reads via in-process `getEmDashCollection`; writes via `EMDASH_API_TOKEN` BFF
 - Dashboard: Astro routes + View Transitions (not a client SPA); Starwind Sidebar
 - `restaurantes.menu_layout` + `restaurantes.theme` (JSON) drive public menu display/theming
-- Owner session: signed cookie `digimenu_owner` (HMAC, Path=/app, TTL 3 days). Secret: `DIGIMENU_SESSION_SECRET` or fallback `EMDASH_ENCRYPTION_KEY`. Revalidate on POST only.
+- Owner session: signed cookie `digimenu_owner` (HMAC, Path=/app, TTL 3 days). Secret: `DIGIMENU_SESSION_SECRET` or fallback `EMDASH_ENCRYPTION_KEY`. `requireOwner` trusts cookie (no EmDash); revalidate + EmDash ULID resolve on POST only.
 
 ## Recent
 - Memory bank updated; Worker schema/content aligned via MCP; code deployed; pushed `9e48470` to `main`

@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { getOwnerAuthCallbackUrl } from "../../../lib/auth/site-url";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export const prerender = false;
@@ -14,11 +15,11 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
 	}
 
 	const supabase = createSupabaseServerClient(request, cookies);
-	const origin = new URL(request.url).origin;
+	const emailRedirectTo = getOwnerAuthCallbackUrl(request);
 	const { error } = await supabase.auth.signInWithOtp({
 		email,
 		options: {
-			emailRedirectTo: `${origin}/app/auth/callback`,
+			emailRedirectTo,
 		},
 	});
 

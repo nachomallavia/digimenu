@@ -4,9 +4,14 @@
 
 1. Authentication → Providers → **Email** enabled (magic link).
 2. Authentication → URL configuration:
-   - Site URL: `http://localhost:4321`
-   - Redirect URLs: `http://localhost:4321/app/auth/callback`
-3. (Later) add Google/Facebook providers; same callback URL.
+   - **Site URL** (fallback if redirect is rejected): prefer production  
+     `https://digimenu.nachomallavia.workers.dev`
+   - **Redirect URLs** (allowlist — must include every callback you use):
+     - `https://digimenu.nachomallavia.workers.dev/app/auth/callback`
+     - `http://localhost:4321/app/auth/callback`
+3. (Later) add Google/Facebook providers; same callback paths.
+
+If the magic link lands on `http://localhost:3000/?code=…` (or any host **without** `/app/auth/callback`), Supabase ignored `emailRedirectTo` because that URL is **not** in Redirect URLs, and fell back to Site URL. Fix the allowlist, then request a **new** magic link (old links keep the bad redirect).
 
 ## Env
 
@@ -14,6 +19,11 @@ Copy from [`.env.example`](../.env.example). Required for local:
 
 - `PUBLIC_SUPABASE_URL`
 - `PUBLIC_SUPABASE_ANON_KEY` (legacy anon or publishable key)
+
+Recommended for production builds (magic-link redirects):
+
+- `PUBLIC_SITE_URL=https://digimenu.nachomallavia.workers.dev`  
+  (local: omit it, or set `http://localhost:4321`)
 
 Owner session cookie (HMAC, httpOnly, path `/app`, TTL **3 days**):
 
@@ -72,12 +82,17 @@ The floating **EmDash / Edit** pill on public pages (e.g. `/m/[slug]`) is **ops/
 
 After the owner completes magic-link login once, copy their `auth.users.id` from Supabase Dashboard → Authentication → Users.
 
-Get Finca ULID from local EmDash (dev server running):
+Get Finca ULID from the **same** EmDash environment the owner will use (local and Worker D1 have different ULIDs for the same slug):
 
 ```bash
+# Local
 npx emdash content list restaurantes --json -u http://localhost:4321
+
+# Worker (or admin / MCP)
+# finca → 01KXEQE87VY4Z5ESANZMC5WH7P on digimenu.nachomallavia.workers.dev
 ```
 
+At login and on `revalidateOwnerSession` (after mutations), DigiMenu re-resolves the ULID from `emdash_restaurant_slug` against the current EmDash DB, so a stale ID in Supabase is corrected. Normal `requireOwner` navigations trust the signed cookie only (no EmDash/Supabase). Still prefer storing the production ULID in `owner_restaurants` for clarity.
 Insert mapping (SQL editor or MCP `execute_sql`) with **service role**:
 
 ```sql

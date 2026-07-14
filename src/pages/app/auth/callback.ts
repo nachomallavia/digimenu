@@ -47,17 +47,19 @@ export const GET: APIRoute = async ({ request, cookies, redirect, url }) => {
 	}
 
 	let restaurantName = restaurant.emdash_restaurant_slug;
+	let restaurantId = restaurant.emdash_restaurant_id;
 	try {
 		const { entry } = await getRestauranteById(restaurant.emdash_restaurant_slug);
+		if (entry?.data.id) restaurantId = entry.data.id;
 		if (entry?.data.nombre) restaurantName = entry.data.nombre;
 	} catch {
-		// keep slug as display fallback
+		// keep mapping id + slug as fallback
 	}
 
 	await setOwnerSessionCookie(cookies, {
 		userId: user.id,
 		email: user.email,
-		restaurantId: restaurant.emdash_restaurant_id,
+		restaurantId,
 		restaurantSlug: restaurant.emdash_restaurant_slug,
 		restaurantName,
 	});
