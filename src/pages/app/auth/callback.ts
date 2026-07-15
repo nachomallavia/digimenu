@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { setOwnerSessionCookie, clearOwnerSessionCookie } from "../../../lib/auth/owner-session";
+import { restaurantSnapshotFromEntry } from "../../../lib/auth/require-owner";
 import { getRestauranteById } from "../../../lib/emdash/client";
 
 export const prerender = false;
@@ -48,13 +49,17 @@ export const GET: APIRoute = async ({ request, cookies, redirect, url }) => {
 
 	let restaurantName = restaurant.emdash_restaurant_slug;
 	let restaurantId = restaurant.emdash_restaurant_id;
+	let entry = null as Awaited<ReturnType<typeof getRestauranteById>>["entry"];
 	try {
-		const { entry } = await getRestauranteById(restaurant.emdash_restaurant_slug);
+		const loaded = await getRestauranteById(restaurant.emdash_restaurant_slug);
+		entry = loaded.entry;
 		if (entry?.data.id) restaurantId = entry.data.id;
 		if (entry?.data.nombre) restaurantName = entry.data.nombre;
 	} catch {
 		// keep mapping id + slug as fallback
 	}
+
+	const restaurantSnapshot = restaurantSnapshotFromEntry(entry, restaurantName);
 
 	await setOwnerSessionCookie(cookies, {
 		userId: user.id,
@@ -62,6 +67,7 @@ export const GET: APIRoute = async ({ request, cookies, redirect, url }) => {
 		restaurantId,
 		restaurantSlug: restaurant.emdash_restaurant_slug,
 		restaurantName,
+		restaurantSnapshot,
 	});
 
 	return redirect(next.startsWith("/") ? next : "/app");

@@ -1,8 +1,9 @@
 import type { AstroCookies } from "astro";
-import { getRestauranteById } from "../emdash/client";
+import { getRestauranteById, type EmDashRestaurante } from "../emdash/client";
 import {
 	readOwnerSessionCookie,
 	setOwnerSessionCookie,
+	type OwnerRestaurantSnapshot,
 } from "./owner-session";
 
 export type OwnerRestaurant = {
@@ -18,25 +19,32 @@ export type OwnerContext = {
 	restaurant: OwnerRestaurant;
 	/** Display name from EmDash / session cookie */
 	restaurantName: string;
+	/** Cached restaurant fields for form GETs (info/menu/estilos) */
+	restaurantSnapshot?: OwnerRestaurantSnapshot;
 };
 
 type RedirectResult = { ok: false; redirect: string };
 type OkResult = { ok: true; owner: OwnerContext };
 export type RequireOwnerResult = RedirectResult | OkResult;
 
-async function resolveRestaurantFromSlug(slug: string): Promise<{
-	id: string | null;
-	name: string;
-}> {
+export function restaurantSnapshotFromEntry(
+	entry: EmDashRestaurante | null | undefined,
+	fallbackName: string,
+): OwnerRestaurantSnapshot {
+	return {
+		nombre: entry?.data.nombre ?? fallbackName,
+		descripcion: entry?.data.descripcion ?? null,
+		menu_layout: entry?.data.menu_layout,
+		theme: entry?.data.theme,
+	};
+}
+
+async function loadRestaurantEntry(slug: string): Promise<EmDashRestaurante | null> {
 	try {
 		const { entry } = await getRestauranteById(slug);
-		if (!entry) return { id: null, name: slug };
-		return {
-			id: entry.data.id ?? null,
-			name: entry.data.nombre ?? slug,
-		};
+		return entry;
 	} catch {
-		return { id: null, name: slug };
+		return null;
 	}
 }
 
@@ -71,10 +79,11 @@ export async function buildOwnerContextFromSupabase(
 	}
 
 	const row = restaurant as OwnerRestaurant;
-	// Resolve ULID from this environment's EmDash (local vs Worker IDs differ).
-	const resolved = await resolveRestaurantFromSlug(row.emdash_restaurant_slug);
-	const restaurantId = resolved.id ?? row.emdash_restaurant_id;
-	const restaurantName = resolved.name;
+	// Resolve ULID + snapshot from this environment's EmDash (local vs Worker IDs differ).
+	const entry = await loadRestaurantEntry(row.emdash_restaurant_slug);
+	const restaurantId = entry?.data.id ?? row.emdash_restaurant_id;
+	const restaurantName = entry?.data.nombre ?? row.emdash_restaurant_slug;
+	const restaurantSnapshot = restaurantSnapshotFromEntry(entry, restaurantName);
 
 	const owner: OwnerContext = {
 		userId: user.id,
@@ -84,6 +93,7 @@ export async function buildOwnerContextFromSupabase(
 			emdash_restaurant_id: restaurantId,
 		},
 		restaurantName,
+		restaurantSnapshot,
 	};
 
 	await setOwnerSessionCookie(cookies, {
@@ -92,6 +102,7 @@ export async function buildOwnerContextFromSupabase(
 		restaurantId,
 		restaurantSlug: row.emdash_restaurant_slug,
 		restaurantName,
+		restaurantSnapshot,
 	});
 
 	return { ok: true, owner };
@@ -100,7 +111,7 @@ export async function buildOwnerContextFromSupabase(
 /**
  * Resolve owner from DigiMenu session cookie when possible.
  * Trusts cookie fields (no EmDash/Supabase) so sidebar navigations stay light.
- * ULID/name refresh happens only in buildOwnerContextFromSupabase (login + revalidate).
+ * ULID/name/snapshot refresh happens only in buildOwnerContextFromSupabase (login + revalidate).
  */
 export async function requireOwner(
 	request: Request,
@@ -114,6 +125,7 @@ export async function requireOwner(
 				userId: session.userId,
 				email: session.email,
 				restaurantName: session.restaurantName,
+				restaurantSnapshot: session.restaurantSnapshot,
 				restaurant: {
 					user_id: session.userId,
 					emdash_restaurant_id: session.restaurantId,
@@ -127,7 +139,7 @@ export async function requireOwner(
 }
 
 /**
- * Revalidate Supabase auth + mapping + restaurant name, refresh cookie (3d TTL).
+ * Revalidate Supabase auth + mapping + restaurant snapshot, refresh cookie (3d TTL).
  * Call after successful owner POSTs / BFF mutations.
  */
 export async function revalidateOwnerSession(

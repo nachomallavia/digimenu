@@ -32,8 +32,13 @@ Owner session cookie (HMAC, httpOnly, path `/app`, TTL **3 days**):
 
 Optional for product writes via BFF:
 
-- `EMDASH_API_BASE=http://localhost:4321`
-- `EMDASH_API_TOKEN=ec_pat_...` (create in EmDash admin)
+- Local (`.env`): `EMDASH_API_BASE=http://localhost:4321` + `EMDASH_API_TOKEN=ec_pat_...`
+- Workers (runtime secrets — do **not** rely on baking `.env` into the build):
+  ```bash
+  echo 'https://digimenu.nachomallavia.workers.dev' | npx wrangler secret put EMDASH_API_BASE
+  npx wrangler secret put EMDASH_API_TOKEN   # PAT from production /_emdash/admin
+  ```
+  `getEmDashApiConfig` reads Cloudflare secrets first; a baked `localhost` from local `.env` would break production writes (Cloudflare 403 / error 1003).
 
 Ops linking (service role, never in browser):
 
@@ -41,7 +46,7 @@ Ops linking (service role, never in browser):
 
 ## DigiMenu owner session
 
-After magic-link login, DigiMenu sets cookie `digimenu_owner` with user + restaurant id/slug/name (signed). Sidebar navigations read that cookie and **do not** call Supabase/EmDash just for chrome.
+After magic-link login, DigiMenu sets cookie `digimenu_owner` with user + restaurant id/slug/name + snapshot (`nombre`, `descripcion`, `menu_layout`, `theme`) (signed). Sidebar navigations and Info/Menu/Estilos GETs read that cookie and **do not** call Supabase/EmDash just for chrome/forms.
 
 - **Issued:** `/app/auth/callback` (and first `requireOwner` fallback if cookie missing)
 - **Cleared:** logout

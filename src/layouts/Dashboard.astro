@@ -2,8 +2,12 @@
 /**
  * Owner DigiMenu panel chrome (`/app/*` authenticated).
  * Always DigiMenu brand — restaurant menu theme does not apply here.
+ *
+ * View Transitions (ClientRouter) disabled for perceived-perf A/B —
+ * soft nav waits for full SSR before swap and can feel slower on Workers.
+ * To restore: import { ClientRouter, fade } from "astro:transitions",
+ * add <ClientRouter slot="head" />, and transition:animate on <main>.
  */
-import { ClientRouter, fade } from "astro:transitions";
 import Root from "./Root.astro";
 import AppSidebar from "../components/app/AppSidebar.astro";
 import { Button } from "@/components/starwind/button";
@@ -27,8 +31,6 @@ const currentPath = Astro.url.pathname;
 ---
 
 <Root title={title} lang="es">
-	<ClientRouter slot="head" />
-
 	<SidebarProvider class="min-h-svh">
 		<AppSidebar
 			currentPath={currentPath}
@@ -57,33 +59,21 @@ const currentPath = Astro.url.pathname;
 								size="sm"
 								target="_blank"
 								rel="noopener noreferrer"
-								data-astro-reload
 							>
 								Ver menú
 							</Button>
 						)
 					}
-					<form method="POST" action="/app/auth/logout" data-astro-reload>
+					<form method="POST" action="/app/auth/logout">
 						<Button type="submit" variant="ghost" size="sm">
 							Salir
 						</Button>
 					</form>
 				</div>
 			</header>
-			<main
-				class="flex-1 px-4 py-6 md:px-6"
-				transition:animate={fade({ duration: "0.12s" })}
-			>
+			<main class="flex-1 px-4 py-6 md:px-6">
 				<slot />
 			</main>
 		</SidebarInset>
 	</SidebarProvider>
 </Root>
-
-<style is:global>
-	/* Instant swap feel: keep old content visible until new is ready (no blank flash) */
-	::view-transition-old(root),
-	::view-transition-new(root) {
-		animation-duration: 0.12s;
-	}
-</style>

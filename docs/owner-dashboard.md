@@ -33,14 +33,25 @@ All owner pages call `requireOwner()`. OAuth / self-serve onboarding are out of 
 
 ## Writes
 
-Reads use in-process EmDash. Mutations need:
+Reads use in-process EmDash. Mutations need `EMDASH_API_BASE` + `EMDASH_API_TOKEN`.
+
+**Local** (`.env`):
 
 ```bash
 EMDASH_API_BASE=http://localhost:4321
 EMDASH_API_TOKEN=ec_pat_...
 ```
 
-Without a PAT, forms stay read-oriented and show a clear message.
+**Workers** (runtime secrets — Vite would otherwise bake local `.env` into the bundle):
+
+```bash
+echo 'https://digimenu.nachomallavia.workers.dev' | npx wrangler secret put EMDASH_API_BASE
+npx wrangler secret put EMDASH_API_TOKEN
+```
+
+Create the PAT in EmDash admin on the **same** environment. Without these, forms stay read-oriented.
+
+Workers also need the compatibility flag `global_fetch_strictly_public` in [`wrangler.jsonc`](../wrangler.jsonc): the BFF self-fetches `EMDASH_API_BASE` (same Worker origin). Without that flag Cloudflare returns **404 / error 1042**.
 
 ## Schema fields on `restaurantes`
 

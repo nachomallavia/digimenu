@@ -1,4 +1,10 @@
+import type { AstroCookies } from "astro";
 import type { OwnerContext } from "../auth/require-owner";
+import { restaurantSnapshotFromEntry } from "../auth/require-owner";
+import {
+	setOwnerSessionCookie,
+	type OwnerRestaurantSnapshot,
+} from "../auth/owner-session";
 import { getRestauranteById, type EmDashRestaurante } from "./client";
 import { emdashJson, getEmDashApiConfig } from "./api";
 
@@ -8,16 +14,42 @@ export type OwnerRestaurantView = {
 	entry: EmDashRestaurante | null;
 };
 
+function entryFromSnapshot(
+	owner: OwnerContext,
+	snapshot: OwnerRestaurantSnapshot,
+): EmDashRestaurante {
+	const slug = owner.restaurant.emdash_restaurant_slug;
+	return {
+		id: slug,
+		slug,
+		status: "published",
+		data: {
+			id: owner.restaurant.emdash_restaurant_id,
+			nombre: snapshot.nombre,
+			descripcion: snapshot.descripcion ?? undefined,
+			menu_layout: snapshot.menu_layout,
+			theme: snapshot.theme,
+		},
+	};
+}
+
 /**
  * Load restaurant for owner pages.
  *
  * - `chromeOnly`: use session cookie fields (no EmDash) — for sidebar/header on light pages.
- * - default: in-process EmDash entry (info/menu/estilos need fields).
+ * - `fromSession`: synthesize entry from cookie snapshot (info/menu/estilos GETs).
+ *   If snapshot missing, one EmDash read + cookie upgrade (when `cookies` passed).
+ * - default: in-process EmDash entry.
  * - `preferApi`: HTTP API path (rare).
  */
 export async function loadOwnerRestaurant(
 	owner: OwnerContext,
-	opts: { preferApi?: boolean; chromeOnly?: boolean } = {},
+	opts: {
+		preferApi?: boolean;
+		chromeOnly?: boolean;
+		fromSession?: boolean;
+		cookies?: AstroCookies;
+	} = {},
 ): Promise<OwnerRestaurantView> {
 	const slug = owner.restaurant.emdash_restaurant_slug;
 	const id = owner.restaurant.emdash_restaurant_id;
@@ -25,6 +57,38 @@ export async function loadOwnerRestaurant(
 
 	if (opts.chromeOnly) {
 		return { slug, name, entry: null };
+	}
+
+	if (opts.fromSession) {
+		if (owner.restaurantSnapshot) {
+			const entry = entryFromSnapshot(owner, owner.restaurantSnapshot);
+			return {
+				slug,
+				name: entry.data.nombre || name,
+				entry,
+			};
+		}
+
+		const { entry } = await getRestauranteById(slug);
+		const restaurantName = entry?.data.nombre ?? name;
+		const snapshot = restaurantSnapshotFromEntry(entry, restaurantName);
+
+		if (opts.cookies) {
+			await setOwnerSessionCookie(opts.cookies, {
+				userId: owner.userId,
+				email: owner.email,
+				restaurantId: entry?.data.id ?? id,
+				restaurantSlug: slug,
+				restaurantName,
+				restaurantSnapshot: snapshot,
+			});
+		}
+
+		return {
+			slug,
+			name: restaurantName,
+			entry,
+		};
 	}
 
 	if (opts.preferApi && getEmDashApiConfig()) {

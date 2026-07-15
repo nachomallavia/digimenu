@@ -56,7 +56,7 @@ if (Astro.request.method === "POST") {
 			if (action === "delete") {
 				await deleteProductoViaApi(producto.data.id);
 				await revalidateOwnerSession(Astro.request, Astro.cookies);
-				return Astro.redirect("/app/productos");
+				return Astro.redirect("/app/productos?fresh=1");
 			}
 
 			const nombre = String(form.get("nombre") ?? "").trim();
@@ -198,3 +198,16 @@ const selectedIds = new Set(selected.map((c) => c.id));
 		</Card>
 	</div>
 </Dashboard>
+
+{
+	saved && (
+		<script define:vars={{ restaurantId: owner.restaurant.emdash_restaurant_id }}>
+			try {
+				sessionStorage.removeItem(`digimenu:owner:productos:${restaurantId}`);
+				sessionStorage.removeItem(`digimenu:owner:categorias:${restaurantId}`);
+			} catch {
+				/* ignore */
+			}
+		</script>
+	)
+}

@@ -62,7 +62,10 @@ if (Astro.request.method === "POST") {
 	}
 }
 
-const restaurant = await loadOwnerRestaurant(owner);
+const restaurant = await loadOwnerRestaurant(owner, {
+	fromSession: true,
+	cookies: Astro.cookies,
+});
 const theme = parseRestaurantTheme(restaurant.entry?.data.theme);
 
 const colorFields = [

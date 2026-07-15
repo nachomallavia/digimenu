@@ -46,7 +46,10 @@ if (Astro.request.method === "POST") {
 	}
 }
 
-const restaurant = await loadOwnerRestaurant(owner);
+const restaurant = await loadOwnerRestaurant(owner, {
+	fromSession: true,
+	cookies: Astro.cookies,
+});
 const layout = parseMenuLayout(restaurant.entry?.data.menu_layout);
 ---
 

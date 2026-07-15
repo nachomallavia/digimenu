@@ -3,15 +3,27 @@ import type { AstroCookies } from "astro";
 export const OWNER_SESSION_COOKIE = "digimenu_owner";
 export const OWNER_SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 3; // 3 days
 
+/** Restaurant fields cached in the owner cookie for light /app form GETs. */
+export type OwnerRestaurantSnapshot = {
+	nombre: string;
+	descripcion?: string | null;
+	menu_layout?: unknown;
+	theme?: unknown;
+};
+
 export type OwnerSessionPayload = {
 	userId: string;
 	email: string | undefined;
 	restaurantId: string;
 	restaurantSlug: string;
 	restaurantName: string;
+	/** Optional — missing on cookies issued before snapshot support */
+	restaurantSnapshot?: OwnerRestaurantSnapshot;
 	iat: number;
 	exp: number;
 };
+
+export type OwnerSessionWritePayload = Omit<OwnerSessionPayload, "iat" | "exp">;
 
 function getSessionSecret(): string {
 	const secret =
@@ -62,8 +74,27 @@ async function hmacVerify(secret: string, data: string, signature: string): Prom
 	return mismatch === 0;
 }
 
+function parseSnapshot(raw: unknown): OwnerRestaurantSnapshot | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	const obj = raw as Record<string, unknown>;
+	if (typeof obj.nombre !== "string") return undefined;
+	return {
+		nombre: obj.nombre,
+		descripcion:
+			obj.descripcion === undefined
+				? undefined
+				: obj.descripcion === null
+					? null
+					: typeof obj.descripcion === "string"
+						? obj.descripcion
+						: undefined,
+		menu_layout: obj.menu_layout,
+		theme: obj.theme,
+	};
+}
+
 export async function sealOwnerSession(
-	payload: Omit<OwnerSessionPayload, "iat" | "exp"> & { iat?: number; exp?: number },
+	payload: OwnerSessionWritePayload & { iat?: number; exp?: number },
 ): Promise<string> {
 	const now = Math.floor(Date.now() / 1000);
 	const full: OwnerSessionPayload = {
@@ -75,6 +106,9 @@ export async function sealOwnerSession(
 		iat: payload.iat ?? now,
 		exp: payload.exp ?? now + OWNER_SESSION_MAX_AGE_SEC,
 	};
+	if (payload.restaurantSnapshot) {
+		full.restaurantSnapshot = payload.restaurantSnapshot;
+	}
 	const body = toBase64Url(new TextEncoder().encode(JSON.stringify(full)));
 	const sig = await hmacSign(getSessionSecret(), body);
 	return `${body}.${sig}`;
@@ -102,6 +136,9 @@ export async function unsealOwnerSession(token: string): Promise<OwnerSessionPay
 		}
 		const now = Math.floor(Date.now() / 1000);
 		if (payload.exp < now) return null;
+		const snapshot = parseSnapshot(payload.restaurantSnapshot);
+		if (snapshot) payload.restaurantSnapshot = snapshot;
+		else delete payload.restaurantSnapshot;
 		return payload;
 	} catch {
 		return null;
@@ -120,7 +157,7 @@ function cookieOptions(maxAge = OWNER_SESSION_MAX_AGE_SEC) {
 
 export async function setOwnerSessionCookie(
 	cookies: AstroCookies,
-	payload: Omit<OwnerSessionPayload, "iat" | "exp">,
+	payload: OwnerSessionWritePayload,
 ): Promise<void> {
 	const token = await sealOwnerSession(payload);
 	cookies.set(OWNER_SESSION_COOKIE, token, cookieOptions());

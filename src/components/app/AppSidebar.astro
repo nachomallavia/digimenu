@@ -49,7 +49,7 @@ function isActive(href: string, exact?: boolean) {
 	<SidebarHeader>
 		<SidebarMenu>
 			<SidebarMenuItem>
-				<SidebarMenuButton size="lg" href="/app" tooltip="DigiMenu" data-astro-prefetch="hover">
+				<SidebarMenuButton size="lg" href="/app" tooltip="DigiMenu" data-astro-prefetch="false">
 					<div
 						class="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-10 items-center justify-center rounded-lg font-semibold"
 					>
@@ -83,7 +83,7 @@ function isActive(href: string, exact?: boolean) {
 									href={item.href}
 									isActive={isActive(item.href, item.matchExact)}
 									tooltip={item.title}
-									data-astro-prefetch="hover"
+									data-astro-prefetch="false"
 									data-owner-nav={item.href}
 									data-owner-nav-exact={item.matchExact ? "1" : undefined}
 								>

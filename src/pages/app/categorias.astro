@@ -4,7 +4,6 @@ import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-own
 import {
 	createCategoriaViaApi,
 	deleteCategoriaViaApi,
-	listCategorias,
 	updateCategoriaViaApi,
 	writesEnabled,
 } from "../../lib/emdash/client";
@@ -12,7 +11,6 @@ import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-resta
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
 import { Label } from "@/components/starwind/label";
-import { Badge } from "@/components/starwind/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
 
 export const prerender = false;
@@ -63,12 +61,7 @@ if (Astro.request.method === "POST") {
 }
 
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
-let categorias: Awaited<ReturnType<typeof listCategorias>> = [];
-try {
-	categorias = await listCategorias();
-} catch (err) {
-	error = error ?? (err instanceof Error ? err.message : "Error al listar categorías");
-}
+const restaurantId = owner.restaurant.emdash_restaurant_id;
 
 const message = saved
 	? savedAction === "delete"
@@ -100,7 +93,7 @@ const message = saved
 				<CardDescription>Se usa para agrupar productos en el menú público.</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<form method="POST" class="flex flex-col gap-3 sm:flex-row sm:items-end" enctype="application/x-www-form-urlencoded" data-astro-reload>
+				<form method="POST" class="flex flex-col gap-3 sm:flex-row sm:items-end" enctype="application/x-www-form-urlencoded">
 					<input type="hidden" name="action" value="create" />
 					<div class="flex flex-1 flex-col gap-1.5">
 						<Label for="label">Nombre</Label>
@@ -117,41 +110,85 @@ const message = saved
 			<CardHeader>
 				<CardTitle>Existentes</CardTitle>
 			</CardHeader>
-			<CardContent class="flex flex-col gap-4">
-				{
-					categorias.length === 0 ? (
-						<p class="text-sm text-muted-foreground">No hay categorías todavía.</p>
-					) : (
-						categorias.map((cat) => (
-							<div class="flex flex-col gap-3 border-b border-border pb-4 last:border-0 last:pb-0 sm:flex-row sm:items-center">
-								<form
-									method="POST"
-									class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center"
-									enctype="application/x-www-form-urlencoded"
-									data-astro-reload
-								>
-									<input type="hidden" name="action" value="rename" />
-									<input type="hidden" name="slug" value={cat.slug} />
-									<div class="flex min-w-0 flex-1 items-center gap-2">
-										<Badge variant="outline">{cat.slug}</Badge>
-										<Input name="label" value={cat.label} required disabled={!canWrite} />
-									</div>
-									<Button type="submit" variant="outline" size="sm" disabled={!canWrite}>
-										Renombrar
-									</Button>
-								</form>
-								<form method="POST" enctype="application/x-www-form-urlencoded" data-astro-reload>
-									<input type="hidden" name="action" value="delete" />
-									<input type="hidden" name="slug" value={cat.slug} />
-									<Button type="submit" variant="ghost" size="sm" disabled={!canWrite}>
-										Eliminar
-									</Button>
-								</form>
-							</div>
-						))
-					)
-				}
+			<CardContent
+				id="owner-categorias-list"
+				class="flex flex-col gap-4"
+				data-restaurant-id={restaurantId}
+				data-can-write={canWrite ? "1" : "0"}
+				aria-live="polite"
+			>
+				<p class="text-sm text-muted-foreground">Cargando categorías…</p>
 			</CardContent>
 		</Card>
 	</div>
 </Dashboard>
+
+<script>
+	import {
+		bustOwnerListCaches,
+		categoriasCacheKey,
+		fetchCategorias,
+		shouldBustFromUrl,
+		swrLoad,
+		type OwnerCategoriaRow,
+	} from "../../lib/app/owner-browser-cache";
+
+	const root = document.getElementById("owner-categorias-list");
+	if (root) {
+		const restaurantId = root.dataset.restaurantId ?? "";
+		const canWrite = root.dataset.canWrite === "1";
+
+		function escapeAttr(value: string) {
+			return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+		}
+
+		function render(cats: OwnerCategoriaRow[]) {
+			if (cats.length === 0) {
+				root!.innerHTML =
+					'<p class="text-sm text-muted-foreground">No hay categorías todavía.</p>';
+				return;
+			}
+
+			root!.innerHTML = cats
+				.map((cat) => {
+					const disabled = canWrite ? "" : "disabled";
+					return `
+				<div class="flex flex-col gap-3 border-b border-border pb-4 last:border-0 last:pb-0 sm:flex-row sm:items-center">
+					<form method="POST" class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center" enctype="application/x-www-form-urlencoded">
+						<input type="hidden" name="action" value="rename" />
+						<input type="hidden" name="slug" value="${escapeAttr(cat.slug)}" />
+						<div class="flex min-w-0 flex-1 items-center gap-2">
+							<span class="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium">${escapeAttr(cat.slug)}</span>
+							<input name="label" value="${escapeAttr(cat.label)}" required ${disabled} class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs transition-colors focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" />
+						</div>
+						<button type="submit" ${disabled} class="border-input bg-background hover:bg-accent hover:text-accent-foreground inline-flex h-8 items-center justify-center rounded-md border px-3 text-sm font-medium shadow-xs disabled:pointer-events-none disabled:opacity-50">Renombrar</button>
+					</form>
+					<form method="POST" enctype="application/x-www-form-urlencoded">
+						<input type="hidden" name="action" value="delete" />
+						<input type="hidden" name="slug" value="${escapeAttr(cat.slug)}" />
+						<button type="submit" ${disabled} class="hover:bg-accent hover:text-accent-foreground inline-flex h-8 items-center justify-center rounded-md px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-50">Eliminar</button>
+					</form>
+				</div>`;
+				})
+				.join("");
+		}
+
+		const bust = shouldBustFromUrl();
+		if (bust) bustOwnerListCaches(restaurantId);
+
+		void swrLoad({
+			key: categoriasCacheKey(restaurantId),
+			bust,
+			fetcher: fetchCategorias,
+			onLoading: () => {
+				root!.innerHTML =
+					'<p class="text-sm text-muted-foreground">Cargando categorías…</p>';
+			},
+			onData: (cats) => render(cats),
+			onError: () => {
+				root!.innerHTML =
+					'<p class="text-sm text-error">No se pudieron cargar las categorías.</p>';
+			},
+		});
+	}
+</script>

@@ -1,15 +1,36 @@
 /**
  * Shared HTTP helpers for EmDash REST writes (PAT / server-only).
+ *
+ * Prefer Cloudflare runtime secrets (`cloudflare:workers` / `process.env`) over
+ * `import.meta.env` so production deploys do not bake `localhost` from `.env`.
  */
+
+import { env } from "cloudflare:workers";
 
 export type EmDashApiConfig = {
 	base: string;
 	token: string;
 };
 
+function readServerEnv(key: string): string | undefined {
+	try {
+		const fromCf = (env as Record<string, unknown>)[key];
+		if (typeof fromCf === "string" && fromCf.length > 0) return fromCf;
+	} catch {
+		// cloudflare:workers unavailable outside Workers runtime
+	}
+
+	const fromProcess =
+		typeof process !== "undefined" ? process.env?.[key] : undefined;
+	if (typeof fromProcess === "string" && fromProcess.length > 0) return fromProcess;
+
+	const fromMeta = (import.meta.env as Record<string, unknown>)[key];
+	return typeof fromMeta === "string" && fromMeta.length > 0 ? fromMeta : undefined;
+}
+
 export function getEmDashApiConfig(): EmDashApiConfig | null {
-	const base = (import.meta.env.EMDASH_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "";
-	const token = import.meta.env.EMDASH_API_TOKEN as string | undefined;
+	const base = (readServerEnv("EMDASH_API_BASE") ?? "").replace(/\/$/, "");
+	const token = readServerEnv("EMDASH_API_TOKEN");
 	if (!base || !token) return null;
 	return { base, token };
 }

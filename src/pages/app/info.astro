@@ -44,7 +44,10 @@ if (Astro.request.method === "POST") {
 	}
 }
 
-const restaurant = await loadOwnerRestaurant(owner);
+const restaurant = await loadOwnerRestaurant(owner, {
+	fromSession: true,
+	cookies: Astro.cookies,
+});
 if (!restaurant.entry) {
 	error = error ?? "No se encontró el restaurante en EmDash.";
 }
