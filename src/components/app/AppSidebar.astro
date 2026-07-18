@@ -8,9 +8,13 @@ import PaletteIcon from "@tabler/icons/outline/palette.svg";
 import TagsIcon from "@tabler/icons/outline/tags.svg";
 import PackageIcon from "@tabler/icons/outline/package.svg";
 import HomeIcon from "@tabler/icons/outline/home.svg";
+import SunIcon from "@tabler/icons/outline/sun.svg";
+import MoonIcon from "@tabler/icons/outline/moon.svg";
+import DeviceDesktopIcon from "@tabler/icons/outline/device-desktop.svg";
 import {
 	Sidebar,
 	SidebarContent,
+	SidebarFooter,
 	SidebarGroup,
 	SidebarGroupContent,
 	SidebarGroupLabel,
@@ -21,14 +25,28 @@ import {
 	SidebarRail,
 	SidebarSeparator,
 } from "@/components/starwind/sidebar";
+import {
+	COLOR_MODE_COOKIE,
+	COLOR_MODE_MAX_AGE,
+	type ColorMode,
+} from "../../lib/color-mode";
 
 interface Props {
 	currentPath: string;
 	restaurantSlug?: string | null;
 	restaurantName?: string | null;
+	/** Keep in sync with SidebarProvider defaultOpen for SSR collapsed state */
+	defaultOpen?: boolean;
+	colorMode?: ColorMode;
 }
 
-const { currentPath, restaurantSlug, restaurantName } = Astro.props;
+const {
+	currentPath,
+	restaurantSlug,
+	restaurantName,
+	defaultOpen = true,
+	colorMode = "system",
+} = Astro.props;
 
 const items = [
 	{ title: "Resumen", href: "/app", icon: HomeIcon, matchExact: true },
@@ -39,30 +57,36 @@ const items = [
 	{ title: "Productos", href: "/app/productos", icon: PackageIcon },
 ];
 
+const themeOptions = [
+	{ mode: "light" as const, label: "Claro", icon: SunIcon },
+	{ mode: "dark" as const, label: "Oscuro", icon: MoonIcon },
+	{ mode: "system" as const, label: "Sistema", icon: DeviceDesktopIcon },
+];
+
 function isActive(href: string, exact?: boolean) {
 	if (exact) return currentPath === href;
 	return currentPath === href || currentPath.startsWith(`${href}/`);
 }
 ---
 
-<Sidebar collapsible="icon" data-owner-sidebar>
+<Sidebar collapsible="icon" defaultOpen={defaultOpen} data-owner-sidebar>
 	<SidebarHeader>
 		<SidebarMenu>
 			<SidebarMenuItem>
-				<SidebarMenuButton size="lg" href="/app" tooltip="DigiMenu">
+				<SidebarMenuButton size="default" href="/app" tooltip="DigiMenu">
 					<div
-						class="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-10 items-center justify-center rounded-lg font-semibold"
+						class="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-[width,height,border-radius,font-size] duration-200 ease-linear group-data-[collapsible=icon]:size-4.5 group-data-[collapsible=icon]:rounded-md group-data-[collapsible=icon]:text-[10px]"
 					>
 						D
 					</div>
 					<div class="grid flex-1 text-left text-sm leading-tight">
 						<span class="truncate font-semibold">DigiMenu</span>
-						<span
+						<!-- <span
 							class="text-sidebar-foreground/70 truncate text-xs"
 							data-owner-restaurant-name
 						>
 							{restaurantName ?? restaurantSlug ?? "Panel"}
-						</span>
+						</span> -->
 					</div>
 				</SidebarMenuButton>
 			</SidebarMenuItem>
@@ -97,10 +121,49 @@ function isActive(href: string, exact?: boolean) {
 		</SidebarGroup>
 	</SidebarContent>
 
+	<SidebarFooter>
+		<div
+			class="flex w-full items-center gap-0.5 rounded-lg bg-sidebar-accent p-0.5 group-data-[collapsible=icon]:flex-col"
+			role="group"
+			aria-label="Tema"
+			data-color-mode-toggle
+			data-color-mode={colorMode}
+		>
+			{
+				themeOptions.map((option) => (
+					<button
+						type="button"
+						class:list={[
+							"text-sidebar-foreground/70 hover:text-sidebar-accent-foreground flex flex-1 items-center justify-center rounded-md p-2 transition-colors",
+							"focus-visible:ring-sidebar-outline focus-visible:ring-2 focus-visible:outline-none",
+							"data-[active=true]:bg-sidebar data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-sm",
+						]}
+						data-color-mode-option={option.mode}
+						data-active={String(colorMode === option.mode)}
+						aria-label={option.label}
+						aria-pressed={colorMode === option.mode}
+						title={option.label}
+					>
+						<option.icon class="size-4.5 shrink-0" />
+						<span class="sr-only">{option.label}</span>
+					</button>
+				))
+			}
+		</div>
+	</SidebarFooter>
+
 	<SidebarRail />
 </Sidebar>
 
 <script>
+	import {
+		COLOR_MODE_COOKIE,
+		COLOR_MODE_MAX_AGE,
+		isDarkMode,
+		parseColorMode,
+		type ColorMode,
+	} from "../../lib/color-mode";
+
 	function syncOwnerNav() {
 		const path = location.pathname;
 		document.querySelectorAll<HTMLElement>("[data-owner-nav]").forEach((el) => {
@@ -111,6 +174,57 @@ function isActive(href: string, exact?: boolean) {
 		});
 	}
 
-	syncOwnerNav();
-	document.addEventListener("astro:page-load", syncOwnerNav);
+	function prefersDark() {
+		return window.matchMedia("(prefers-color-scheme: dark)").matches;
+	}
+
+	function applyColorMode(mode: ColorMode) {
+		const dark = isDarkMode(mode, prefersDark());
+		document.documentElement.classList.toggle("dark", dark);
+		document.documentElement.dataset.colorMode = mode;
+		document.cookie = `${COLOR_MODE_COOKIE}=${mode}; path=/app; max-age=${COLOR_MODE_MAX_AGE}; SameSite=Lax`;
+
+		document.querySelectorAll<HTMLElement>("[data-color-mode-toggle]").forEach((toggle) => {
+			toggle.dataset.colorMode = mode;
+			toggle.querySelectorAll<HTMLElement>("[data-color-mode-option]").forEach((btn) => {
+				const active = btn.dataset.colorModeOption === mode;
+				btn.dataset.active = String(active);
+				btn.setAttribute("aria-pressed", String(active));
+			});
+		});
+	}
+
+	function setupColorModeToggle() {
+		document.querySelectorAll<HTMLElement>("[data-color-mode-toggle]").forEach((toggle) => {
+			if (toggle.dataset.bound === "1") return;
+			toggle.dataset.bound = "1";
+			toggle.addEventListener("click", (event) => {
+				const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+					"[data-color-mode-option]",
+				);
+				if (!target) return;
+				applyColorMode(parseColorMode(target.dataset.colorModeOption));
+			});
+		});
+	}
+
+	function onSystemPreferenceChange() {
+		const mode = parseColorMode(document.documentElement.dataset.colorMode);
+		if (mode === "system") applyColorMode("system");
+	}
+
+	function setupSystemPreferenceListener() {
+		const mq = window.matchMedia("(prefers-color-scheme: dark)");
+		mq.removeEventListener("change", onSystemPreferenceChange);
+		mq.addEventListener("change", onSystemPreferenceChange);
+	}
+
+	function init() {
+		syncOwnerNav();
+		setupColorModeToggle();
+		setupSystemPreferenceListener();
+	}
+
+	init();
+	document.addEventListener("astro:page-load", init);
 </script>

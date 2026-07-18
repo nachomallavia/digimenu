@@ -33,15 +33,24 @@ type Props = HTMLAttributes<"div"> & {
    * @default "offcanvas"
    */
   collapsible?: "offcanvas" | "icon" | "none";
+  /**
+   * Initial open state (keep in sync with SidebarProvider defaultOpen for SSR).
+   * @default true
+   */
+  defaultOpen?: boolean;
 };
 
 const {
   side = "left",
   variant = "sidebar",
   collapsible = "offcanvas",
+  defaultOpen = true,
   class: className,
   ...rest
 } = Astro.props;
+
+const initialState = defaultOpen ? "expanded" : "collapsed";
+const initialCollapsible = defaultOpen ? "" : collapsible;
 
 const SIDEBAR_WIDTH_MOBILE = "18rem";
 ---
@@ -64,8 +73,8 @@ const SIDEBAR_WIDTH_MOBILE = "18rem";
       {/* Desktop sidebar */}
       <div
         class={sidebar({ class: className })}
-        data-state="expanded"
-        data-collapsible=""
+        data-state={initialState}
+        data-collapsible={initialCollapsible}
         data-collapsible-mode={collapsible}
         data-variant={variant}
         data-side={side}

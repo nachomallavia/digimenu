@@ -5,19 +5,27 @@
  * EmDash `/_emdash/admin` does not use this layout.
  */
 import "../styles/starwind.css";
+import type { ColorMode } from "../lib/color-mode";
 
 interface Props {
 	title: string;
 	description?: string | null;
 	canonical?: string | null;
 	lang?: string;
+	/**
+	 * Owner-panel color preference. When set, applies `.dark` on `<html>`
+	 * and runs a blocking script so system mode does not flash.
+	 * Omit on public menu pages (restaurant theme owns appearance).
+	 */
+	colorMode?: ColorMode;
 }
 
-const { title, description, canonical, lang = "es" } = Astro.props;
+const { title, description, canonical, lang = "es", colorMode } = Astro.props;
+const htmlDarkClass = colorMode === "dark" ? "dark" : undefined;
 ---
 
 <!doctype html>
-<html lang={lang}>
+<html lang={lang} class={htmlDarkClass} data-color-mode={colorMode}>
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -25,6 +33,20 @@ const { title, description, canonical, lang = "es" } = Astro.props;
 		<title>{title}</title>
 		{description && <meta name="description" content={description} />}
 		{canonical && <link rel="canonical" href={canonical} />}
+		{
+			colorMode && (
+				<script is:inline define:vars={{ colorMode }}>
+					(function () {
+						const dark =
+							colorMode === "dark" ||
+							(colorMode === "system" &&
+								window.matchMedia("(prefers-color-scheme: dark)").matches);
+						document.documentElement.classList.toggle("dark", dark);
+						document.documentElement.dataset.colorMode = colorMode;
+					})();
+				</script>
+			)
+		}
 		<slot name="head" />
 	</head>
 	<body class="bg-background text-foreground">

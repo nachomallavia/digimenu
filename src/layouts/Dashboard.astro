@@ -16,6 +16,7 @@ import {
 	SidebarProvider,
 	SidebarTrigger,
 } from "@/components/starwind/sidebar";
+import { COLOR_MODE_COOKIE, parseColorMode } from "../lib/color-mode";
 
 interface Props {
 	title: string;
@@ -28,14 +29,20 @@ interface Props {
 
 const { title, email, restaurantSlug, restaurantName } = Astro.props;
 const currentPath = Astro.url.pathname;
+
+const SIDEBAR_COOKIE = "digimenu_sidebar_open";
+const sidebarOpen = Astro.cookies.get(SIDEBAR_COOKIE)?.value !== "false";
+const colorMode = parseColorMode(Astro.cookies.get(COLOR_MODE_COOKIE)?.value);
 ---
 
-<Root title={title} lang="es">
-	<SidebarProvider class="min-h-svh">
+<Root title={title} lang="es" colorMode={colorMode}>
+	<SidebarProvider class="min-h-svh" defaultOpen={sidebarOpen} cookieName={SIDEBAR_COOKIE}>
 		<AppSidebar
 			currentPath={currentPath}
 			restaurantSlug={restaurantSlug}
 			restaurantName={restaurantName}
+			defaultOpen={sidebarOpen}
+			colorMode={colorMode}
 		/>
 		<SidebarInset>
 			<header

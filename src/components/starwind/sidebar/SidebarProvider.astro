@@ -14,15 +14,23 @@ type Props = HTMLAttributes<"div"> & {
    * @default "b"
    */
   keyboardShortcut?: string;
+  /**
+   * Cookie name used to persist desktop open/collapsed state across navigations.
+   * When set, toggles write `true` / `false` (Path=/app, 7 days).
+   */
+  cookieName?: string;
 };
 
 const {
   defaultOpen = true,
   keyboardShortcut = "b",
+  cookieName,
   class: className,
   style,
   ...rest
 } = Astro.props;
+
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
 const SIDEBAR_WIDTH = "18rem";
 const SIDEBAR_WIDTH_ICON = "3.5rem";
@@ -41,6 +49,8 @@ const mergedStyle = {
   data-state={defaultOpen ? "expanded" : "collapsed"}
   data-mobile-open="false"
   data-keyboard-shortcut={keyboardShortcut}
+  data-sidebar-cookie={cookieName}
+  data-sidebar-cookie-max-age={cookieName ? String(SIDEBAR_COOKIE_MAX_AGE) : undefined}
   style={mergedStyle}
   {...rest}
   data-slot="sidebar-provider"
@@ -146,7 +156,16 @@ const mergedStyle = {
     setOpen(open: boolean) {
       const state = open ? "expanded" : "collapsed";
       this.provider.setAttribute("data-state", state);
+      this.persistCookie(open);
       this.provider.dispatchEvent(new CustomEvent("sidebar:change", { detail: { open, state } }));
+    }
+
+    private persistCookie(open: boolean) {
+      const name = this.provider.getAttribute("data-sidebar-cookie");
+      if (!name) return;
+      const maxAge =
+        this.provider.getAttribute("data-sidebar-cookie-max-age") || String(60 * 60 * 24 * 7);
+      document.cookie = `${name}=${open}; path=/app; max-age=${maxAge}; SameSite=Lax`;
     }
 
     toggleMobile() {
