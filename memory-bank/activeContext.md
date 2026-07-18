@@ -26,6 +26,7 @@ Categorías como colección + reducción de round trips: COMPLETADO (local + pro
 - Quick wins seguridad: open redirect `//` en callback, logout solo POST, validación hex server-side en estilos, fix ternario `primary-foreground`
 - `imageSrc` helper: fallback a `/_emdash/api/media/file/{storageKey}` para image fields nativos leídos in-process
 - Perf GETs /app: snapshot de sesión ahora incluye `logo` → `/app/info` renderiza `fromSession` (cookie vieja sin logo cae a 1 lectura + upgrade via `requireLogo`); `/app/categorias` lista client-side con SWR (template + sprite de iconos SSR, filas clonadas en el cliente)
+- Prefetch: al asentarse el resumen (`/app`), `astro:prefetch` precalienta las 5 rutas del panel en idle (el fetch del resumen ya llena los caches SWR de productos/categorías); sidebar mantiene `data-astro-prefetch="false"` para no duplicar
 - Deploy verificado: https://digimenu.nachomallavia.workers.dev/m/finca (15 secciones, 86 productos)
 
 ## Next

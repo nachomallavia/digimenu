@@ -13,7 +13,7 @@ import { parseRestaurantTheme } from "../../lib/restaurant-theme";
 
 const { slug } = Astro.params;
 if (!slug) {
-	return Astro.redirect("/404");
+	return Astro.rewrite("/404");
 }
 
 const { entry: restaurante, cacheHint: restaurantHint } = await getEmDashEntry(
@@ -22,7 +22,7 @@ const { entry: restaurante, cacheHint: restaurantHint } = await getEmDashEntry(
 );
 
 if (!restaurante) {
-	return Astro.redirect("/404");
+	return Astro.rewrite("/404");
 }
 
 const restaurantId = restaurante.data.id;
