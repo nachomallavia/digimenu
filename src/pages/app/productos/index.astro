@@ -1,7 +1,11 @@
 ---
 import Dashboard from "../../../layouts/Dashboard.astro";
 import { requireOwner } from "../../../lib/auth/require-owner";
-import { createProductoViaApi, writesEnabled } from "../../../lib/emdash/client";
+import {
+	createProductoViaApi,
+	listProductosForRestaurant,
+	writesEnabled,
+} from "../../../lib/emdash/client";
 import { loadOwnerRestaurant } from "../../../lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
@@ -48,6 +52,14 @@ if (Astro.request.method === "POST") {
 }
 
 const restaurantId = owner.restaurant.emdash_restaurant_id;
+const { entries: productos, cacheHint } = await listProductosForRestaurant(restaurantId);
+if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
+
+const priceFmt = new Intl.NumberFormat("es-AR", {
+	style: "currency",
+	currency: "ARS",
+	maximumFractionDigits: 0,
+});
 ---
 
 <Dashboard
@@ -91,80 +103,28 @@ const restaurantId = owner.restaurant.emdash_restaurant_id;
 			</CardContent>
 		</Card>
 
-		<div
-			id="owner-productos-list"
-			class="overflow-hidden rounded-lg border border-border"
-			data-restaurant-id={restaurantId}
-			aria-live="polite"
-		>
-			<p class="px-4 py-6 text-sm text-muted-foreground">Cargando productos…</p>
+		<div class="overflow-hidden rounded-lg border border-border">
+			{
+				productos.length === 0 ? (
+					<p class="px-4 py-6 text-sm text-muted-foreground">No hay productos publicados.</p>
+				) : (
+					<ul class="divide-y divide-border">
+						{productos.map((p) => (
+							<li>
+								<a
+									href={`/app/productos/${encodeURIComponent(p.id)}`}
+									class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50"
+								>
+									<span class="min-w-0 truncate font-medium">{p.data.nombre}</span>
+									<span class="shrink-0 tabular-nums text-muted-foreground">
+										{priceFmt.format(p.data.precio)}
+									</span>
+								</a>
+							</li>
+						))}
+					</ul>
+				)
+			}
 		</div>
 	</div>
 </Dashboard>
-
-<script>
-	import {
-		bustOwnerListCaches,
-		fetchProductos,
-		productosCacheKey,
-		shouldBustFromUrl,
-		swrLoad,
-		type OwnerProductoRow,
-	} from "../../../lib/app/owner-browser-cache";
-
-	const root = document.getElementById("owner-productos-list");
-	if (root) {
-		const restaurantId = root.dataset.restaurantId ?? "";
-		const priceFmt = new Intl.NumberFormat("es-AR", {
-			style: "currency",
-			currency: "ARS",
-			maximumFractionDigits: 0,
-		});
-
-		function render(rows: OwnerProductoRow[]) {
-			if (rows.length === 0) {
-				root!.innerHTML =
-					'<p class="px-4 py-6 text-sm text-muted-foreground">No hay productos publicados.</p>';
-				return;
-			}
-			root!.innerHTML = `<ul class="divide-y divide-border">${rows
-				.map(
-					(row) => `
-				<li>
-					<a href="/app/productos/${encodeURIComponent(row.slug)}" class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50">
-						<span class="min-w-0 truncate font-medium"></span>
-						<span class="shrink-0 tabular-nums text-muted-foreground"></span>
-					</a>
-				</li>`,
-				)
-				.join("")}</ul>`;
-			const links = root!.querySelectorAll("a");
-			rows.forEach((row, i) => {
-				const a = links[i];
-				if (!a) return;
-				const name = a.querySelector("span.min-w-0");
-				const price = a.querySelector("span.tabular-nums");
-				if (name) name.textContent = row.nombre;
-				if (price) price.textContent = priceFmt.format(row.precio);
-			});
-		}
-
-		const bust = shouldBustFromUrl();
-		if (bust) bustOwnerListCaches(restaurantId);
-
-		void swrLoad({
-			key: productosCacheKey(restaurantId),
-			bust,
-			fetcher: fetchProductos,
-			onLoading: () => {
-				root!.innerHTML =
-					'<p class="px-4 py-6 text-sm text-muted-foreground">Cargando productos…</p>';
-			},
-			onData: (rows) => render(rows),
-			onError: () => {
-				root!.innerHTML =
-					'<p class="px-4 py-6 text-sm text-error">No se pudieron cargar los productos.</p>';
-			},
-		});
-	}
-</script>

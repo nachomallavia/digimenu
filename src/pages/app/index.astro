@@ -1,7 +1,11 @@
 ---
 import Dashboard from "../../layouts/Dashboard.astro";
 import { requireOwner } from "../../lib/auth/require-owner";
-import { writesEnabled } from "../../lib/emdash/client";
+import {
+	listCategoriasForRestaurant,
+	listProductosForRestaurant,
+	writesEnabled,
+} from "../../lib/emdash/client";
 import { loadOwnerRestaurant } from "../../lib/emdash/owner-restaurant";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
 import { Button } from "@/components/starwind/button";
@@ -17,6 +21,18 @@ const { owner } = auth;
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
 const canWrite = writesEnabled();
 const restaurantId = owner.restaurant.emdash_restaurant_id;
+
+const [
+	{ entries: productos, cacheHint: productosHint },
+	{ entries: categorias, cacheHint: categoriasHint },
+] = await Promise.all([
+	listProductosForRestaurant(restaurantId),
+	listCategoriasForRestaurant(restaurantId),
+]);
+if (Astro.cache?.enabled) {
+	Astro.cache.set(productosHint);
+	Astro.cache.set(categoriasHint);
+}
 ---
 
 <Dashboard
@@ -35,19 +51,14 @@ const restaurantId = owner.restaurant.emdash_restaurant_id;
 			</p>
 		</div>
 
-		<div
-			id="owner-resumen"
-			class="grid gap-4 sm:grid-cols-2"
-			data-restaurant-id={restaurantId}
-			aria-live="polite"
-		>
+		<div class="grid gap-4 sm:grid-cols-2">
 			<Card>
 				<CardHeader>
 					<CardTitle>Productos</CardTitle>
 					<CardDescription>Publicados en tu menú</CardDescription>
 				</CardHeader>
 				<CardContent class="flex items-end justify-between gap-4">
-					<p data-product-count class="text-3xl font-semibold tabular-nums text-muted-foreground">…</p>
+					<p class="text-3xl font-semibold tabular-nums">{productos.length}</p>
 					<Button href="/app/productos" variant="outline" size="sm">
 						Gestionar
 					</Button>
@@ -59,14 +70,13 @@ const restaurantId = owner.restaurant.emdash_restaurant_id;
 					<CardDescription>Secciones del menú</CardDescription>
 				</CardHeader>
 				<CardContent class="flex items-end justify-between gap-4">
-					<p data-category-count class="text-3xl font-semibold tabular-nums text-muted-foreground">…</p>
+					<p class="text-3xl font-semibold tabular-nums">{categorias.length}</p>
 					<Button href="/app/categorias" variant="outline" size="sm">
 						Gestionar
 					</Button>
 				</CardContent>
 			</Card>
 		</div>
-		<p id="owner-resumen-error" class="text-error hidden"></p>
 
 		{
 			!canWrite && (
@@ -79,73 +89,3 @@ const restaurantId = owner.restaurant.emdash_restaurant_id;
 		}
 	</div>
 </Dashboard>
-
-<script>
-	import { prefetch } from "astro:prefetch";
-	import {
-		categoriasCacheKey,
-		fetchCategorias,
-		fetchProductos,
-		productosCacheKey,
-		readJsonCache,
-		writeJsonCache,
-		type OwnerCategoriaRow,
-		type OwnerProductoRow,
-	} from "../../lib/app/owner-browser-cache";
-
-	// Warm the browser prefetch cache for panel routes once the resumen settles,
-	// so sidebar navigations skip the SSR round trip to the Worker.
-	function prefetchPanelRoutes() {
-		const routes = ["/app/productos", "/app/categorias", "/app/info", "/app/menu", "/app/estilos"];
-		const run = () => {
-			for (const href of routes) prefetch(href);
-		};
-		if ("requestIdleCallback" in window) {
-			requestIdleCallback(run, { timeout: 2000 });
-		} else {
-			setTimeout(run, 300);
-		}
-	}
-
-	const root = document.getElementById("owner-resumen");
-	const errEl = document.getElementById("owner-resumen-error");
-	if (root) {
-		const restaurantId = root.dataset.restaurantId ?? "";
-		const productEl = root.querySelector<HTMLElement>("[data-product-count]");
-		const categoryEl = root.querySelector<HTMLElement>("[data-category-count]");
-
-		function paint(productCount: number | null, categoryCount: number | null) {
-			if (productEl && productCount != null) {
-				productEl.textContent = String(productCount);
-				productEl.classList.remove("text-muted-foreground");
-			}
-			if (categoryEl && categoryCount != null) {
-				categoryEl.textContent = String(categoryCount);
-				categoryEl.classList.remove("text-muted-foreground");
-			}
-		}
-
-		const cachedProductos = readJsonCache<OwnerProductoRow[]>(productosCacheKey(restaurantId));
-		const cachedCategorias = readJsonCache<OwnerCategoriaRow[]>(
-			categoriasCacheKey(restaurantId),
-		);
-		if (cachedProductos || cachedCategorias) {
-			paint(cachedProductos?.length ?? null, cachedCategorias?.length ?? null);
-		}
-
-		void Promise.all([fetchProductos(), fetchCategorias()])
-			.then(([productos, categorias]) => {
-				writeJsonCache(productosCacheKey(restaurantId), productos);
-				writeJsonCache(categoriasCacheKey(restaurantId), categorias);
-				paint(productos.length, categorias.length);
-			})
-			.catch((err) => {
-				if (!cachedProductos && !cachedCategorias && errEl) {
-					errEl.textContent =
-						err instanceof Error ? err.message : "Error al cargar resumen";
-					errEl.classList.remove("hidden");
-				}
-			})
-			.finally(prefetchPanelRoutes);
-	}
-</script>

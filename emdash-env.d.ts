@@ -5,6 +5,22 @@
 
 import type { ContentBylineCredit, TaxonomyTerm, PortableTextBlock } from "emdash";
 
+export interface Categoria {
+  id: string;
+  slug: string | null;
+  status: string;
+  nombre: string;
+  restaurante: string;
+  icon?: string;
+  cover?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
+  orden?: number;
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt: Date | null;
+  bylines?: ContentBylineCredit[];
+  terms?: Record<string, TaxonomyTerm[]>;
+}
+
 export interface Page {
   id: string;
   slug: string | null;
@@ -27,6 +43,7 @@ export interface Producto {
   precio: number;
   imagen?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
   restaurante?: string;
+  categoria?: string;
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;
@@ -53,6 +70,7 @@ export interface Restaurante {
 
 declare module "emdash" {
   interface EmDashCollections {
+    categorias: Categoria;
     pages: Page;
     productos: Producto;
     restaurantes: Restaurante;

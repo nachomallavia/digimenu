@@ -69,7 +69,7 @@ Site settings: Digimenu title, dateFormat `DD/MM/YY`.
 
 ## Owner `/app`
 
-See `docs/owner-dashboard.md`. Shell: Sidebar + View Transitions. Mutations need `EMDASH_API_TOKEN`.
+See `docs/owner-dashboard.md`. Shell: Sidebar (View Transitions disabled). Mutations need `EMDASH_API_TOKEN`.
 
 ## Worker sync note
 

@@ -10,14 +10,15 @@ All owner pages call `requireOwner()`. OAuth / self-serve onboarding are out of 
 
 ## Shell
 
-- Layout: [`src/layouts/Dashboard.astro`](../src/layouts/Dashboard.astro) — DigiMenu sidebar (Starwind) + top bar + View Transitions (`ClientRouter`).
+- Layout: [`src/layouts/Dashboard.astro`](../src/layouts/Dashboard.astro) — DigiMenu sidebar (Starwind) + top bar.
+- View Transitions (`ClientRouter`) are **disabled** (soft nav waited on full SSR and felt slower on Workers). Restore notes are in the layout file.
 - Restaurant theming applies only on the public menu (`Menu.astro`), never on the dashboard.
 
 ## Routes
 
 | Path | Purpose |
 |------|---------|
-| `/app` | Resumen |
+| `/app` | Resumen (SSR counts from live collections) |
 | `/app/info` | Info restaurante (nombre, descripción, logo) |
 | `/app/menu` | Tipo de menú (`menu_layout` JSON) |
 | `/app/estilos` | Estilos / theme tokens (`theme` JSON) |
@@ -26,14 +27,12 @@ All owner pages call `requireOwner()`. OAuth / self-serve onboarding are out of 
 | `/app/productos/[id]` | Detalle / editar / borrar + categoría (select único) + imagen |
 | `/app/login` | Magic link |
 | `/app/pending` | Logged in, no restaurant link |
-| `/app/api/restaurante` | BFF GET/PATCH restaurante |
-| `/app/api/productos` | BFF GET/POST productos |
-| `/app/api/productos/[id]` | BFF GET/PUT/DELETE producto |
-| `/app/api/categorias` | BFF GET/POST/PUT/DELETE categorías |
+
+Mutations are form POST on these pages (not a separate JSON BFF).
 
 ## Writes
 
-Reads use in-process EmDash. Mutations need `EMDASH_API_BASE` + `EMDASH_API_TOKEN`.
+Reads use in-process EmDash (`getEmDashCollection` / `list*` helpers). Mutations need `EMDASH_API_BASE` + `EMDASH_API_TOKEN` (server-side PAT to EmDash content/media APIs).
 
 **Local** (`.env`):
 
@@ -51,7 +50,7 @@ npx wrangler secret put EMDASH_API_TOKEN
 
 Create the PAT in EmDash admin on the **same** environment. Without these, forms stay read-oriented.
 
-Workers also need the compatibility flag `global_fetch_strictly_public` in [`wrangler.jsonc`](../wrangler.jsonc): the BFF self-fetches `EMDASH_API_BASE` (same Worker origin). Without that flag Cloudflare returns **404 / error 1042**.
+Workers also need the compatibility flag `global_fetch_strictly_public` in [`wrangler.jsonc`](../wrangler.jsonc): the owner BFF self-fetches `EMDASH_API_BASE` (same Worker origin). Without that flag Cloudflare returns **404 / error 1042**.
 
 ## Media uploads
 
@@ -72,17 +71,49 @@ Default EmDash max file size is 10MB. With R2 binding, uploads go through the Wo
 
 ## Categorías (`categorias` collection)
 
-Per-restaurant collection (no taxonomy): `nombre` (req), `restaurante` (reference, req), `icon` (Tabler id — curated list in `src/lib/category-icons.ts`), `cover` (image), `orden` (integer; orders menu sections). The BFF validates ownership on every mutation (404 if the category doesn't belong to the session restaurant). Deleting a category leaves `productos.categoria` dangling — those products render under "Sin categoría".
+Per-restaurant collection (no taxonomy): `nombre` (req), `restaurante` (reference, req), `icon` (Tabler id — curated list in `src/lib/category-icons.ts`), `cover` (image), `orden` (integer; orders menu sections). Page handlers validate ownership on every mutation (404 / error if the category doesn't belong to the session restaurant). Deleting a category leaves `productos.categoria` dangling — those products render under "Sin categoría".
 
 ## Session refresh on writes
 
-Product/category mutations never touch the session cookie. Restaurant-level mutations (info / menu / estilos / `PATCH /app/api/restaurante`) re-sign the cookie via `refreshOwnerSnapshot`, building the snapshot from the payload just written (no extra Supabase/EmDash round trips).
+Product/category mutations never touch the session cookie. Restaurant-level mutations (info / menu / estilos) re-sign the cookie via `refreshOwnerSnapshot`, building the snapshot from the payload just written (no extra Supabase/EmDash round trips).
 
-## Page load strategy (Workers latency)
+## Page load strategy
 
-In-process EmDash reads on the Worker cost ~600ms, so GETs avoid them:
+**Rule:** each owner GET owns its reads in frontmatter via live collections. The browser makes **one** document request for that page’s data. Sidebar chrome stays `chromeOnly` (cookie name/slug, no EmDash). Always `Astro.cache.set(cacheHint)` when querying.
 
-- `/app/productos` and `/app/categorias`: SSR is cookie-only (`chromeOnly`); the list renders client-side from the BFF with sessionStorage SWR (`src/lib/app/owner-browser-cache.ts`). `?saved=1` / `?action=` busts the cache.
-- `/app/info`, `/app/menu`, `/app/estilos`: render from the session cookie snapshot (`fromSession`). The snapshot includes `logo` (`{ src, alt } | null`); pre-logo cookies fall back to one EmDash read + cookie upgrade (`requireLogo`).
+| Route | Data loading |
+|-------|----------------|
+| `/app` | `Promise.all(listProductos, listCategorias)` → counts in markup |
+| `/app/productos` | `listProductosForRestaurant` → `<ul>` in Astro |
+| `/app/categorias` | `listCategoriasForRestaurant` → forms mapped in Astro |
+| `/app/productos/[id]` | `getProductoBySlug` + `listCategoriasForRestaurant` (select) |
+| `/app/info`, `/menu`, `/estilos` | `fromSession` restaurant snapshot (`logo` included; old cookies fall back to one EmDash read + upgrade via `requireLogo`) |
 
-Seed defines these for empty DBs. Existing DBs can be migrated with `scripts/migrate-categorias.mjs` (local) or via Worker MCP.
+### Before vs after (SWR frankenstein → live collections)
+
+Former approach: chromeOnly HTML shell + client `GET /app/api/*` + sessionStorage SWR (`owner-browser-cache.ts`). Same EmDash list work, second HTTP hop, loading flash.
+
+| Metric | Before (SWR) | After (SSR collections) |
+|--------|--------------|-------------------------|
+| Cold `/app` HTTP | 3 (HTML + 2 APIs) | **1** |
+| Cold `/app/productos` HTTP | 2 (HTML + API) | **1** |
+| Cold `/app/categorias` HTTP | 2 (HTML + API) | **1** |
+| List in first HTML | No (“Cargando…”) | Yes |
+| Extra modules | `owner-browser-cache.ts` + `/app/api/*` | None |
+| Soft-nav TTFB | Often lower (empty shell) | Includes EmDash list in document |
+| Time-to-usable-list | TTFB_html + TTFB_api (+ paint) | Document TTFB only |
+
+**Local measurements** (2026-07-18, `npx emdash dev`, Finca: 86 productos / 15 categorías):
+
+| Route (after, authenticated, 1 HTTP) | Total time | Notes |
+|--------------------------------------|------------|--------|
+| `/app` | ≈ **149ms** | Counts in HTML; no “Cargando…” |
+| `/app/productos` | ≈ **82ms** | 86 product links in first HTML |
+| `/app/categorias` | ≈ **85ms** | 15 edit forms in first HTML |
+| `/m/finca` (proxy, warm) | TTFB ≈ **82–86ms** | Same in-process list helpers |
+
+Before: same EmDash work plus a second `/app/api/*` hop after an empty shell. Deleted `/app/api/productos|categorias|restaurante` now return **404**.
+
+If Worker EmDash list latency makes soft nav feel worse, fix query/cache performance — do **not** reintroduce a second HTTP list layer.
+
+Seed defines schema for empty DBs. Existing DBs can be migrated with `scripts/migrate-categorias.mjs` (local) or via Worker MCP.

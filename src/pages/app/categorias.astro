@@ -8,6 +8,7 @@ import {
 	deleteCategoriaViaApi,
 	formImageFile,
 	getCategoriaBySlug,
+	imageSrc,
 	listCategoriasForRestaurant,
 	updateCategoriaViaApi,
 	uploadMediaViaApi,
@@ -104,9 +105,9 @@ if (Astro.request.method === "POST") {
 	}
 }
 
-// List renders client-side from /app/api/categorias (sessionStorage SWR) —
-// SSR stays cookie-only so navigations are light on Workers.
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const { entries: categorias, cacheHint } = await listCategoriasForRestaurant(restaurantId);
+if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 
 const message = saved
 	? savedAction === "delete"
@@ -157,179 +158,99 @@ const message = saved
 			<CardHeader>
 				<CardTitle>Existentes</CardTitle>
 			</CardHeader>
-			<CardContent
-				id="owner-categorias-list"
-				class="flex flex-col gap-6"
-				data-restaurant-id={restaurantId}
-				aria-live="polite"
-			>
-				<p class="text-sm text-muted-foreground">Cargando categorías…</p>
+			<CardContent class="flex flex-col gap-6">
+				{
+					categorias.length === 0 ? (
+						<p class="text-sm text-muted-foreground">No hay categorías todavía.</p>
+					) : (
+						categorias.map((cat) => {
+							const coverSrc = imageSrc(cat.data.cover);
+							const icon = cat.data.icon ?? null;
+							return (
+								<div class="flex flex-col gap-4 border-b border-border pb-6 last:border-0 last:pb-0">
+									<form method="POST" class="flex flex-col gap-3" enctype="multipart/form-data">
+										<input type="hidden" name="action" value="save" />
+										<input type="hidden" name="slug" value={cat.id} />
+
+										<div class="flex min-w-0 items-center gap-2">
+											{icon && (
+												<span class="shrink-0">
+													<CategoryIcon icon={icon} class="size-5 shrink-0" />
+												</span>
+											)}
+											<span class="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium">
+												{cat.id}
+											</span>
+											<Input
+												name="label"
+												required
+												disabled={!canWrite}
+												class="min-w-0"
+												value={cat.data.nombre}
+											/>
+										</div>
+
+										<div class="flex flex-col gap-1.5">
+											<Label>Icono (opcional)</Label>
+											<select
+												name="icon"
+												disabled={!canWrite}
+												class="border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+											>
+												<option value="" selected={!icon}>
+													Sin icono
+												</option>
+												{CATEGORY_ICON_OPTIONS.map((opt) => (
+													<option value={opt.id} selected={icon === opt.id}>
+														{opt.label}
+													</option>
+												))}
+											</select>
+										</div>
+
+										<div class="flex flex-col gap-2">
+											<Label>Portada (opcional)</Label>
+											{coverSrc && (
+												<img
+													src={coverSrc}
+													alt={cat.data.nombre}
+													class="h-24 w-full max-w-sm rounded-md border border-border object-cover"
+												/>
+											)}
+											<Input name="cover" type="file" accept="image/*" disabled={!canWrite} />
+											{coverSrc && (
+												<label class="flex items-center gap-2 text-sm">
+													<input
+														type="checkbox"
+														name="remove_cover"
+														value="1"
+														disabled={!canWrite}
+													/>
+													Quitar portada
+												</label>
+											)}
+										</div>
+
+										<div class="flex flex-wrap gap-2">
+											<Button type="submit" variant="primary" size="sm" disabled={!canWrite}>
+												Guardar
+											</Button>
+										</div>
+									</form>
+
+									<form method="POST" enctype="application/x-www-form-urlencoded">
+										<input type="hidden" name="action" value="delete" />
+										<input type="hidden" name="slug" value={cat.id} />
+										<Button type="submit" variant="ghost" size="sm" disabled={!canWrite}>
+											Eliminar categoría
+										</Button>
+									</form>
+								</div>
+							);
+						})
+					)
+				}
 			</CardContent>
 		</Card>
 	</div>
-
-	{/* Per-category form, cloned client-side for each row. */}
-	<template id="categoria-item-template">
-		<div class="flex flex-col gap-4 border-b border-border pb-6 last:border-0 last:pb-0">
-			<form method="POST" class="flex flex-col gap-3" enctype="multipart/form-data">
-				<input type="hidden" name="action" value="save" />
-				<input type="hidden" name="slug" value="" />
-
-				<div class="flex min-w-0 items-center gap-2">
-					<span data-icon-slot class="hidden shrink-0"></span>
-					<span
-						data-slug-badge
-						class="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium"
-					></span>
-					<Input name="label" required disabled={!canWrite} class="min-w-0" />
-				</div>
-
-				<div class="flex flex-col gap-1.5">
-					<Label>Icono (opcional)</Label>
-					<select
-						name="icon"
-						disabled={!canWrite}
-						class="border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-					>
-						<option value="">Sin icono</option>
-						{CATEGORY_ICON_OPTIONS.map((opt) => (
-							<option value={opt.id}>{opt.label}</option>
-						))}
-					</select>
-				</div>
-
-				<div class="flex flex-col gap-2">
-					<Label>Portada (opcional)</Label>
-					<img
-						data-cover-preview
-						alt=""
-						class="hidden h-24 w-full max-w-sm rounded-md border border-border object-cover"
-					/>
-					<Input name="cover" type="file" accept="image/*" disabled={!canWrite} />
-					<label data-remove-cover class="hidden items-center gap-2 text-sm">
-						<input type="checkbox" name="remove_cover" value="1" disabled={!canWrite} />
-						Quitar portada
-					</label>
-				</div>
-
-				<div class="flex flex-wrap gap-2">
-					<Button type="submit" variant="primary" size="sm" disabled={!canWrite}>
-						Guardar
-					</Button>
-				</div>
-			</form>
-
-			<form method="POST" enctype="application/x-www-form-urlencoded">
-				<input type="hidden" name="action" value="delete" />
-				<input type="hidden" name="slug" value="" />
-				<Button type="submit" variant="ghost" size="sm" disabled={!canWrite}>
-					Eliminar categoría
-				</Button>
-			</form>
-		</div>
-	</template>
-
-	{/* SVG sprite so the client script can clone curated Tabler icons. */}
-	<div id="categoria-icon-sprite" class="hidden" aria-hidden="true">
-		{CATEGORY_ICON_OPTIONS.map((opt) => (
-			<span data-icon={opt.id}>
-				<CategoryIcon icon={opt.id} class="size-5 shrink-0" />
-			</span>
-		))}
-	</div>
 </Dashboard>
-
-<script>
-	import {
-		categoriasCacheKey,
-		fetchCategorias,
-		shouldBustFromUrl,
-		swrLoad,
-		type OwnerCategoriaRow,
-	} from "../../lib/app/owner-browser-cache";
-
-	const root = document.getElementById("owner-categorias-list");
-	const template = document.getElementById(
-		"categoria-item-template",
-	) as HTMLTemplateElement | null;
-	const sprite = document.getElementById("categoria-icon-sprite");
-
-	if (root && template) {
-		const restaurantId = root.dataset.restaurantId ?? "";
-		let renderedJson: string | null = null;
-
-		function buildRow(row: OwnerCategoriaRow): DocumentFragment {
-			const node = template!.content.cloneNode(true) as DocumentFragment;
-
-			node.querySelectorAll<HTMLInputElement>('input[name="slug"]').forEach((el) => {
-				el.value = row.slug;
-			});
-
-			const badge = node.querySelector("[data-slug-badge]");
-			if (badge) badge.textContent = row.slug;
-
-			const label = node.querySelector<HTMLInputElement>('input[name="label"]');
-			if (label) label.value = row.label;
-
-			const select = node.querySelector<HTMLSelectElement>('select[name="icon"]');
-			if (select) select.value = row.icon ?? "";
-
-			const iconSlot = node.querySelector("[data-icon-slot]");
-			const iconSvg = row.icon
-				? sprite?.querySelector(`[data-icon="${row.icon}"] svg`)
-				: null;
-			if (iconSlot && iconSvg) {
-				iconSlot.appendChild(iconSvg.cloneNode(true));
-				iconSlot.classList.remove("hidden");
-			}
-
-			if (row.coverSrc) {
-				const cover = node.querySelector<HTMLImageElement>("[data-cover-preview]");
-				if (cover) {
-					cover.src = row.coverSrc;
-					cover.alt = row.label;
-					cover.classList.remove("hidden");
-				}
-				const removeCover = node.querySelector("[data-remove-cover]");
-				if (removeCover) {
-					removeCover.classList.remove("hidden");
-					removeCover.classList.add("flex");
-				}
-			}
-
-			return node;
-		}
-
-		function render(rows: OwnerCategoriaRow[]) {
-			// Skip identical re-renders so a background refresh doesn't wipe edits in progress.
-			const json = JSON.stringify(rows);
-			if (json === renderedJson) return;
-			renderedJson = json;
-
-			if (rows.length === 0) {
-				root!.innerHTML =
-					'<p class="text-sm text-muted-foreground">No hay categorías todavía.</p>';
-				return;
-			}
-			const frag = document.createDocumentFragment();
-			for (const row of rows) frag.appendChild(buildRow(row));
-			root!.replaceChildren(frag);
-		}
-
-		const bust = shouldBustFromUrl();
-		void swrLoad({
-			key: categoriasCacheKey(restaurantId),
-			bust,
-			fetcher: fetchCategorias,
-			onLoading: () => {
-				root!.innerHTML =
-					'<p class="text-sm text-muted-foreground">Cargando categorías…</p>';
-			},
-			onData: (rows) => render(rows),
-			onError: () => {
-				root!.innerHTML =
-					'<p class="text-sm text-error">No se pudieron cargar las categorías.</p>';
-			},
-		});
-	}
-</script>

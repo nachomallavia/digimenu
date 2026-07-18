@@ -81,7 +81,6 @@ The floating **EmDash / Edit** pill on public pages (e.g. `/m/[slug]`) is **ops/
 | `/app/pending` | Logged in but no `owner_restaurants` row |
 | `/app` | Owner dashboard shell (sidebar + resumen) |
 | `/app/info` … `/app/productos/[id]` | See [owner-dashboard.md](./owner-dashboard.md) |
-| `/app/api/*` | BFF JSON (restaurante, productos, categorias) |
 
 ## Link a user to Finca
 

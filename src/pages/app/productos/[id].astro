@@ -255,16 +255,3 @@ const imagenSrc = imageSrc(current.data.imagen) ?? null;
 		</Card>
 	</div>
 </Dashboard>
-
-{
-	saved && (
-		<script define:vars={{ restaurantId: owner.restaurant.emdash_restaurant_id }}>
-			try {
-				sessionStorage.removeItem(`digimenu:owner:productos:${restaurantId}`);
-				sessionStorage.removeItem(`digimenu:owner:categorias:${restaurantId}`);
-			} catch {
-				/* ignore */
-			}
-		</script>
-	)
-}
