@@ -44,7 +44,7 @@ export type EmDashProducto = {
 		precio: number;
 		imagen?: EmDashImage;
 		restaurante?: string;
-		categoria?: string | null;
+		categoria?: string;
 	};
 };
 
@@ -174,8 +174,8 @@ export async function listProductosForRestaurant(restaurantId: string) {
 	if (error) {
 		throw new Error(error.message ?? "Failed to list productos");
 	}
-
-	const typed = entries as EmDashProducto[];
+	// Preserve categoria as reference ULID (not display name) for edits / API.
+	const typed = entries as unknown as EmDashProducto[];
 	await setCachedList(
 		"productos",
 		restaurantId,
@@ -398,17 +398,15 @@ export async function createProductoViaApi(input: {
 	return created;
 }
 
-export async function updateProductoViaApi(
-	id: string,
-	data: {
-		nombre?: string;
-		precio?: number;
-		descripcion?: string | null;
-		imagen?: EmDashImage | null;
-		categoria?: string | null;
-	},
-	restaurantId: string,
-) {
+export type ProductoUpdateData = {
+	nombre?: string;
+	precio?: number;
+	descripcion?: string | null;
+	imagen?: EmDashImage | null;
+	categoria?: string | null;
+};
+
+async function putProductoViaApi(id: string, data: ProductoUpdateData) {
 	requireWrites();
 	const updated = await emdashJson<ContentApiResponse>(
 		`/_emdash/api/content/productos/${encodeURIComponent(id)}`,
@@ -418,8 +416,48 @@ export async function updateProductoViaApi(
 		},
 	);
 	await publishContent("productos", id);
+	return updated;
+}
+
+export async function updateProductoViaApi(
+	id: string,
+	data: ProductoUpdateData,
+	restaurantId: string,
+) {
+	const updated = await putProductoViaApi(id, data);
 	await bustOwnerListCache(restaurantId, "both");
 	return updated;
+}
+
+/**
+ * Batch product updates with a single owner-list cache bust.
+ * Continues on per-item errors; caller should surface `failed`.
+ */
+export async function updateProductosBatchViaApi(
+	changes: Record<string, ProductoUpdateData>,
+	restaurantId: string,
+): Promise<{
+	updated: number;
+	failed: { id: string; error: string }[];
+}> {
+	requireWrites();
+	const failed: { id: string; error: string }[] = [];
+	let updated = 0;
+	for (const [id, data] of Object.entries(changes)) {
+		try {
+			await putProductoViaApi(id, data);
+			updated += 1;
+		} catch (err) {
+			failed.push({
+				id,
+				error: err instanceof Error ? err.message : "No se pudo actualizar",
+			});
+		}
+	}
+	if (updated > 0) {
+		await bustOwnerListCache(restaurantId, "both");
+	}
+	return { updated, failed };
 }
 
 export async function deleteProductoViaApi(id: string, restaurantId: string) {

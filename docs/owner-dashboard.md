@@ -23,12 +23,12 @@ All owner pages call `requireOwner()`. OAuth / self-serve onboarding are out of 
 | `/app/menu` | Tipo de menú (`menu_layout` JSON) |
 | `/app/estilos` | Estilos / theme tokens (`theme` JSON) |
 | `/app/categorias` | CRUD colección `categorias` (nombre + icono + portada en un solo form) |
-| `/app/productos` | Lista + crear producto |
+| `/app/productos` | Lista con edición inline (nombre / categoría / precio) + batch save |
 | `/app/productos/[id]` | Detalle / editar / borrar + categoría (select único) + imagen |
 | `/app/login` | Magic link |
 | `/app/pending` | Logged in, no restaurant link |
 
-Mutations are form POST on these pages (not a separate JSON BFF).
+Mutations are usually form POST on these pages. Exception: `/app/productos` accepts `POST` with `Content-Type: application/json` for `batchUpdate` (multi-row save via nanostores pending map) and `delete` (row trash), returning JSON without a full page reload. Client state lives in `src/lib/owner-edits/`.
 
 ## Writes
 

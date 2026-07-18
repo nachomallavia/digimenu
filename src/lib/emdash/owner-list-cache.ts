@@ -17,7 +17,8 @@ type MemoryEntry = {
 const memoryFallback = new Map<string, MemoryEntry>();
 
 function cacheKeyUrl(kind: OwnerListKind, restaurantId: string): string {
-	return `https://owner-list-cache.internal/${kind}/${encodeURIComponent(restaurantId)}`;
+	// v2: productos.categoria is reference ULID (not display name).
+	return `https://owner-list-cache.internal/v2/${kind}/${encodeURIComponent(restaurantId)}`;
 }
 
 function cacheRequest(kind: OwnerListKind, restaurantId: string): Request {

@@ -1,16 +1,24 @@
 ---
 import Dashboard from "@/layouts/Dashboard.astro";
+import EditIcon from "@/assets/lucide-icons-svg/square-pen.svg";
+import TrashIcon from "@/assets/lucide-icons-svg/trash-2.svg";
 import { requireOwner } from "@/lib/auth/require-owner";
 import {
-	createProductoViaApi,
+	assertCategoriaBelongsToRestaurant,
+	assertProductoBelongsToRestaurant,
+	deleteProductoViaApi,
+	getCategoriaBySlug,
+	getProductoBySlug,
 	listProductosForRestaurant,
+	listCategoriasForRestaurant,
+	updateProductosBatchViaApi,
 	writesEnabled,
+	type ProductoUpdateData,
 } from "@/lib/emdash/client";
 import { loadOwnerRestaurant } from "@/lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
-import { Label } from "@/components/starwind/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/starwind/select";
 
 export const prerender = false;
 
@@ -22,44 +30,172 @@ if (!auth.ok) {
 const { owner } = auth;
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
 const canWrite = writesEnabled();
-let error: string | null = null;
+const restaurantId = owner.restaurant.emdash_restaurant_id;
 
-if (Astro.request.method === "POST") {
-	const form = await Astro.request.formData();
-	const nombre = String(form.get("nombre") ?? "").trim();
-	const precio = Number(form.get("precio"));
-	const descripcion = String(form.get("descripcion") ?? "").trim();
+const contentType = Astro.request.headers.get("content-type") ?? "";
+if (Astro.request.method === "POST" && contentType.includes("application/json")) {
+	if (!canWrite) {
+		return Response.json(
+			{ ok: false, error: "Escrituras no configuradas (falta EMDASH_API_TOKEN)." },
+			{ status: 403 },
+		);
+	}
 
-	if (!nombre || Number.isNaN(precio)) {
-		error = "Nombre y precio válidos son obligatorios.";
-	} else if (!canWrite) {
-		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
-	} else {
+	let body: unknown;
+	try {
+		body = await Astro.request.json();
+	} catch {
+		return Response.json({ ok: false, error: "JSON inválido." }, { status: 400 });
+	}
+
+	const action =
+		typeof body === "object" && body && "action" in body
+			? String((body as { action: unknown }).action ?? "")
+			: "";
+
+	if (action === "delete") {
+		const id =
+			typeof body === "object" && body && "id" in body
+				? String((body as { id: unknown }).id ?? "")
+				: "";
+		if (!id) {
+			return Response.json({ ok: false, error: "Id requerido." }, { status: 400 });
+		}
 		try {
-			const created = await createProductoViaApi({
-				nombre,
-				precio,
-				descripcion: descripcion || undefined,
-				restauranteId: owner.restaurant.emdash_restaurant_id,
-			});
-			return Astro.redirect(
-				`/app/productos/${created.item.slug ?? created.item.id}?fresh=1`,
-			);
+			const { entry } = await getProductoBySlug(id);
+			if (!entry || !assertProductoBelongsToRestaurant(entry, restaurantId)) {
+				return Response.json({ ok: false, error: "Producto no encontrado." }, { status: 404 });
+			}
+			await deleteProductoViaApi(entry.data.id, restaurantId);
+			return Response.json({ ok: true });
 		} catch (err) {
-			error = err instanceof Error ? err.message : "No se pudo crear";
+			return Response.json(
+				{ ok: false, error: err instanceof Error ? err.message : "No se pudo eliminar" },
+				{ status: 500 },
+			);
 		}
 	}
+
+	if (action === "batchUpdate") {
+		const changesRaw =
+			typeof body === "object" && body && "changes" in body
+				? (body as { changes: unknown }).changes
+				: null;
+		if (!changesRaw || typeof changesRaw !== "object" || Array.isArray(changesRaw)) {
+			return Response.json({ ok: false, error: "changes inválido." }, { status: 400 });
+		}
+
+		const entries = Object.entries(changesRaw as Record<string, unknown>);
+		if (entries.length === 0) {
+			return Response.json({ ok: true, updated: 0 });
+		}
+		if (entries.length > 200) {
+			return Response.json(
+				{ ok: false, error: "Máximo 200 productos por guardado." },
+				{ status: 400 },
+			);
+		}
+
+		const allowedKeys = new Set(["nombre", "precio", "categoria"]);
+		const validated: Record<string, ProductoUpdateData> = {};
+		const failed: { id: string; error: string }[] = [];
+
+		for (const [id, patchUnknown] of entries) {
+			if (!id || typeof patchUnknown !== "object" || !patchUnknown || Array.isArray(patchUnknown)) {
+				failed.push({ id: id || "(vacío)", error: "Patch inválido." });
+				continue;
+			}
+			const patchObj = patchUnknown as Record<string, unknown>;
+			const keys = Object.keys(patchObj);
+			if (keys.length === 0 || keys.length > 3 || keys.some((k) => !allowedKeys.has(k))) {
+				failed.push({ id, error: "Campos no permitidos." });
+				continue;
+			}
+
+			try {
+				const { entry } = await getProductoBySlug(id);
+				if (!entry || !assertProductoBelongsToRestaurant(entry, restaurantId)) {
+					failed.push({ id, error: "Producto no encontrado." });
+					continue;
+				}
+
+				const data: ProductoUpdateData = {};
+
+				if ("nombre" in patchObj) {
+					const nombre = String(patchObj.nombre ?? "").trim();
+					if (!nombre) {
+						failed.push({ id, error: "Nombre obligatorio." });
+						continue;
+					}
+					data.nombre = nombre;
+				}
+
+				if ("precio" in patchObj) {
+					const precio = Number(patchObj.precio);
+					if (!Number.isFinite(precio) || precio < 0) {
+						failed.push({ id, error: "Precio inválido." });
+						continue;
+					}
+					data.precio = Math.round(precio);
+				}
+
+				if ("categoria" in patchObj) {
+					const raw = patchObj.categoria;
+					if (raw === null || raw === "") {
+						data.categoria = null;
+					} else {
+						const catId = String(raw);
+						const { entry: cat } = await getCategoriaBySlug(catId);
+						if (!cat || !assertCategoriaBelongsToRestaurant(cat, restaurantId)) {
+							failed.push({ id, error: "Categoría inválida." });
+							continue;
+						}
+						data.categoria = cat.data.id;
+					}
+				}
+
+				validated[entry.data.id] = data;
+			} catch (err) {
+				failed.push({
+					id,
+					error: err instanceof Error ? err.message : "Error de validación",
+				});
+			}
+		}
+
+		try {
+			const result =
+				Object.keys(validated).length > 0
+					? await updateProductosBatchViaApi(validated, restaurantId)
+					: { updated: 0, failed: [] as { id: string; error: string }[] };
+
+			const allFailed = [...failed, ...result.failed];
+			return Response.json({
+				ok: allFailed.length === 0,
+				updated: result.updated,
+				failed: allFailed,
+			});
+		} catch (err) {
+			return Response.json(
+				{
+					ok: false,
+					updated: 0,
+					failed,
+					error: err instanceof Error ? err.message : "No se pudo guardar",
+				},
+				{ status: 500 },
+			);
+		}
+	}
+
+	return Response.json({ ok: false, error: "Acción desconocida." }, { status: 400 });
 }
 
-const restaurantId = owner.restaurant.emdash_restaurant_id;
 const { entries: productos, cacheHint } = await listProductosForRestaurant(restaurantId);
+const { entries: categorias } = await listCategoriasForRestaurant(restaurantId);
 if (cacheHint && Astro.cache?.enabled) Astro.cache.set(cacheHint);
 
-const priceFmt = new Intl.NumberFormat("es-AR", {
-	style: "currency",
-	currency: "ARS",
-	maximumFractionDigits: 0,
-});
+const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 ---
 
 <Dashboard
@@ -68,63 +204,528 @@ const priceFmt = new Intl.NumberFormat("es-AR", {
 	restaurantSlug={restaurant.slug}
 	restaurantName={restaurant.name}
 >
-	<div class="mx-auto flex max-w-3xl flex-col gap-6">
+	<div
+		data-productos-editor
+		data-can-write={canWrite ? "true" : "false"}
+		data-categoria-ids={categoriaIdsJson}
+		class="mx-auto flex max-w-full flex-col gap-12 pb-24"
+	>
 		<div class="flex flex-wrap items-end justify-between gap-3">
-			<div>
-				<h1 class="text-2xl font-semibold tracking-tight">Productos</h1>
-				<p class="text-muted-foreground">Items del menú de tu restaurante.</p>
+			<div class="w-full flex flex-wrap items-end justify-between gap-3">
+				<div class="flex flex-col gap-1">
+					<h1 class="text-2xl font-semibold tracking-tight">Productos</h1>
+					<p class="text-muted-foreground">Items del menú de tu restaurante.</p>
+				</div>
+
+				<div class="flex gap-4">
+					<Button variant="outline">Descargar CSV</Button>
+					<Button variant="default">Subir CSV</Button>
+				</div>
+			</div>
+		</div>
+		<div class="w-full flex items-center justify-between gap-4">
+			<Input
+				type="search"
+				placeholder="Buscar producto"
+				class="w-full max-w-sm"
+				data-productos-search
+				autocomplete="off"
+			/>
+			<div class="flex gap-2">
+				<Select>
+					<SelectTrigger>
+						<SelectValue placeholder="Filtrar por categoría" />
+					</SelectTrigger>
+					<SelectContent>
+						{categorias.map((c) => (
+							<SelectItem value={c.data.id}>{c.data.nombre}</SelectItem>
+						))}
+						<SelectItem value="all">Todas las categorías</SelectItem>
+					</SelectContent>
+				</Select>
+				<Select>
+					<SelectTrigger>
+						<SelectValue placeholder="Ordenar por" />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="nombre">Nombre</SelectItem>
+						<SelectItem value="precio">Precio</SelectItem>
+						<SelectItem value="created_at">Fecha de creación</SelectItem>
+						<SelectItem value="updated_at">Fecha de actualización</SelectItem>
+					</SelectContent>
+				</Select>
+				<Button variant="outline">Asc</Button>
+				<Button variant="outline">Desc</Button>
 			</div>
 		</div>
 
-		{error && <p class="text-sm text-error">{error}</p>}
-
-		<Card>
-			<CardHeader>
-				<CardTitle>Nuevo producto</CardTitle>
-				<CardDescription>Después podés asignar categoría e imagen en el detalle.</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<form method="POST" class="grid gap-3 sm:grid-cols-[1fr_8rem_auto]" enctype="application/x-www-form-urlencoded">
-					<div class="flex flex-col gap-1.5">
-						<Label for="nombre">Nombre</Label>
-						<Input id="nombre" name="nombre" required disabled={!canWrite} />
-					</div>
-					<div class="flex flex-col gap-1.5">
-						<Label for="precio">Precio</Label>
-						<Input id="precio" name="precio" type="number" min="0" step="1" required disabled={!canWrite} />
-					</div>
-					<div class="flex items-end">
-						<Button type="submit" variant="primary" disabled={!canWrite}>
-							Crear
-						</Button>
-					</div>
-					<input type="hidden" name="descripcion" value="" />
-				</form>
-			</CardContent>
-		</Card>
-
-		<div class="overflow-hidden rounded-lg border border-border">
-			{
-				productos.length === 0 ? (
-					<p class="px-4 py-6 text-sm text-muted-foreground">No hay productos publicados.</p>
-				) : (
-					<ul class="divide-y divide-border">
-						{productos.map((p) => (
-							<li>
-								<a
-									href={`/app/productos/${encodeURIComponent(p.id)}`}
-									class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50"
+		<div class="overflow-x-auto rounded-md border border-border">
+			<table class="w-full caption-bottom text-sm" data-productos-table>
+				<thead class="[&_tr]:border-b">
+					<tr class="border-b border-border">
+						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
+							Nombre
+						</th>
+						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
+							Categoría
+						</th>
+						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
+							Precio
+						</th>
+						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
+							Acciones
+						</th>
+					</tr>
+				</thead>
+				<tbody class="[&_tr:last-child]:border-0" data-productos-tbody>
+					{productos.length === 0 ? (
+						<tr>
+							<td colspan="4" class="text-muted-foreground p-6 text-center">
+								No hay productos todavía.
+							</td>
+						</tr>
+					) : (
+						productos.map((p) => {
+							const id = p.data.id;
+							const catId = p.data.categoria ?? "";
+							const detailHref = `/app/productos/${p.slug ?? id}`;
+							return (
+								<tr
+									class="border-b border-border transition-colors"
+									data-producto-row={id}
 								>
-									<span class="min-w-0 truncate font-medium">{p.data.nombre}</span>
-									<span class="shrink-0 tabular-nums text-muted-foreground">
-										{priceFmt.format(p.data.precio)}
-									</span>
-								</a>
-							</li>
-						))}
-					</ul>
-				)
-			}
+									<td class="p-2 align-middle">
+										<Input
+											type="text"
+											value={p.data.nombre}
+											class="w-full min-w-[10rem]"
+											required
+											disabled={!canWrite}
+											data-producto-id={id}
+											data-field="nombre"
+											data-original={p.data.nombre}
+										/>
+									</td>
+									<td class="p-2 align-middle">
+										<select
+											class="border-input bg-background focus-visible:ring-ring flex h-9 w-full min-w-[9rem] rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+											disabled={!canWrite}
+											data-producto-id={id}
+											data-field="categoria"
+											data-original={catId}
+										>
+											<option value="" selected={!catId}>
+												Sin categoría
+											</option>
+											{categorias.map((c) => (
+												<option
+													value={c.data.id}
+													selected={catId === c.data.id}
+												>
+													{c.data.nombre}
+												</option>
+											))}
+										</select>
+									</td>
+									<td class="p-2 align-middle">
+										<Input
+											type="number"
+											value={String(p.data.precio)}
+											class="w-full min-w-[6rem]"
+											min="0"
+											step="1"
+											required
+											disabled={!canWrite}
+											data-producto-id={id}
+											data-field="precio"
+											data-original={String(p.data.precio)}
+										/>
+									</td>
+									<td class="p-2 align-middle">
+										<div class="flex items-center gap-1">
+											<Button variant="ghost" size="sm" href={detailHref} title="Editar detalle">
+												<EditIcon class="w-4 h-4" />
+											</Button>
+											{canWrite && (
+												<Button
+													variant="ghost"
+													size="sm"
+													type="button"
+													title="Eliminar"
+													data-delete-id={id}
+													data-delete-name={p.data.nombre}
+												>
+													<TrashIcon class="w-4 h-4" />
+												</Button>
+											)}
+										</div>
+									</td>
+								</tr>
+							);
+						})
+					)}
+					<tr data-productos-search-empty hidden>
+						<td colspan="4" class="text-muted-foreground p-6 text-center">
+							Ningún producto coincide con la búsqueda.
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<div
+			data-productos-sticky
+			hidden
+			class="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4 md:pl-[calc(var(--sidebar-width,16rem)+1rem)]"
+		>
+			<div
+				class="pointer-events-auto flex w-full max-w-xl items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 shadow-lg"
+			>
+				<p class="text-sm font-medium" data-sticky-label>Guardar 0 cambios</p>
+				<div class="flex gap-2">
+					<Button type="button" variant="outline" size="sm" data-discard-edits>
+						Descartar
+					</Button>
+					<Button type="button" variant="primary" size="sm" data-save-edits>
+						Guardar
+					</Button>
+				</div>
+			</div>
+		</div>
+
+		<div
+			data-owner-toast
+			hidden
+			role="status"
+			class="fixed bottom-20 left-1/2 z-50 max-w-sm -translate-x-1/2 rounded-md border px-4 py-2 text-sm shadow-lg data-[toast-type=success]:border-success/40 data-[toast-type=success]:bg-background data-[toast-type=success]:text-success data-[toast-type=error]:border-error/40 data-[toast-type=error]:bg-background data-[toast-type=error]:text-error md:bottom-24"
+		>
+			<span data-owner-toast-message></span>
 		</div>
 	</div>
 </Dashboard>
+
+<script>
+	import { postBatchUpdate, postDelete } from "@/lib/owner-edits/batch-client";
+	import {
+		discardProductoEdits,
+		dropProductoPending,
+		fieldErrors,
+		markProductosSaved,
+		pending,
+		productosHasFieldErrors,
+		productosPendingCount,
+		saving,
+		searchQuery,
+		setProductoField,
+		setProductoFieldError,
+		showToast,
+		type ProductoField,
+		type ProductoPatch,
+	} from "@/lib/owner-edits/productos-edits";
+	import { bindToastHost } from "@/lib/owner-edits/toast-ui";
+
+	function initProductosEditor() {
+		const rootEl = document.querySelector<HTMLElement>("[data-productos-editor]");
+		if (!rootEl || rootEl.dataset.bound === "1") return;
+		rootEl.dataset.bound = "1";
+		const root = rootEl;
+
+		const canWrite = root.dataset.canWrite === "true";
+		const sticky = root.querySelector<HTMLElement>("[data-productos-sticky]");
+		const stickyLabel = root.querySelector<HTMLElement>("[data-sticky-label]");
+		const saveBtn = root.querySelector<HTMLButtonElement>("[data-save-edits]");
+		const discardBtn = root.querySelector<HTMLButtonElement>("[data-discard-edits]");
+		const tbody = root.querySelector<HTMLElement>("[data-productos-tbody]");
+		const toastHost = root.querySelector<HTMLElement>("[data-owner-toast]");
+		const searchInput = root.querySelector<HTMLInputElement>("[data-productos-search]");
+		const searchEmpty = root.querySelector<HTMLElement>("[data-productos-search-empty]");
+
+		if (toastHost) bindToastHost(toastHost);
+
+		searchQuery.set("");
+		if (searchInput) searchInput.value = "";
+
+		function foldSearchText(value: string): string {
+			return value
+				.trim()
+				.toLowerCase()
+				.normalize("NFD")
+				.replace(/[\u0300-\u036f]/g, "");
+		}
+
+		function applySearchFilter() {
+			const query = foldSearchText(searchQuery.get());
+			const rows = root.querySelectorAll<HTMLElement>("[data-producto-row]");
+			let visible = 0;
+			rows.forEach((row) => {
+				const nombreEl = row.querySelector<HTMLInputElement>('[data-field="nombre"]');
+				const nombre = foldSearchText(nombreEl?.value ?? "");
+				const match = !query || nombre.includes(query);
+				row.hidden = !match;
+				if (match) visible += 1;
+			});
+			if (searchEmpty) {
+				searchEmpty.hidden = !(query && rows.length > 0 && visible === 0);
+			}
+		}
+
+		searchInput?.addEventListener("input", () => {
+			searchQuery.set(searchInput.value);
+		});
+		searchQuery.subscribe(applySearchFilter);
+		applySearchFilter();
+
+		let categoriaIds = new Set<string>();
+		try {
+			const parsed = JSON.parse(root.dataset.categoriaIds ?? "[]") as unknown;
+			if (Array.isArray(parsed)) {
+				categoriaIds = new Set(parsed.map(String));
+			}
+		} catch {
+			categoriaIds = new Set();
+		}
+
+		function originalOf(el: HTMLElement): string {
+			return el.dataset.original ?? "";
+		}
+
+		function parseOriginalCategoria(raw: string): string | null {
+			return raw === "" ? null : raw;
+		}
+
+		function parseOriginalPrecio(raw: string): number {
+			return Number(raw);
+		}
+
+		function syncDirtyRows() {
+			const map = pending.get();
+			root.querySelectorAll<HTMLElement>("[data-producto-row]").forEach((row) => {
+				const id = row.dataset.productoRow;
+				if (!id) return;
+				row.toggleAttribute("data-dirty", Boolean(map[id]));
+				row.classList.toggle("bg-muted/40", Boolean(map[id]));
+			});
+		}
+
+		function syncFieldErrorStyles() {
+			const errs = fieldErrors.get();
+			root.querySelectorAll<HTMLElement>("[data-field]").forEach((el) => {
+				const id = el.dataset.productoId;
+				const field = el.dataset.field as ProductoField | undefined;
+				if (!id || !field) return;
+				const hasErr = Boolean(errs[id]?.[field]);
+				el.classList.toggle("border-error", hasErr);
+				el.setAttribute("aria-invalid", hasErr ? "true" : "false");
+			});
+		}
+
+		function updateSticky() {
+			if (!sticky || !stickyLabel || !saveBtn || !discardBtn) return;
+			const n = productosPendingCount.get();
+			const isSaving = saving.get();
+			const hasErrors = productosHasFieldErrors.get();
+			sticky.hidden = n === 0 && !isSaving;
+			stickyLabel.textContent = isSaving
+				? "Guardando…"
+				: `Guardar ${n} cambio${n === 1 ? "" : "s"}`;
+			saveBtn.disabled = !canWrite || n === 0 || isSaving || hasErrors;
+			discardBtn.disabled = isSaving || n === 0;
+			syncDirtyRows();
+			syncFieldErrorStyles();
+		}
+
+		productosPendingCount.subscribe(updateSticky);
+		saving.subscribe(updateSticky);
+		productosHasFieldErrors.subscribe(updateSticky);
+		fieldErrors.subscribe(syncFieldErrorStyles);
+		pending.subscribe(syncDirtyRows);
+		updateSticky();
+
+		function applyField(el: HTMLInputElement | HTMLSelectElement) {
+			const id = el.dataset.productoId;
+			const field = el.dataset.field as ProductoField | undefined;
+			if (!id || !field || !canWrite) return;
+
+			if (field === "nombre") {
+				const trimmed = el.value.trim();
+				const original = originalOf(el);
+				if (!trimmed) {
+					setProductoFieldError(id, "nombre", "Nombre obligatorio");
+					// Keep out of pending until valid
+					setProductoField(id, "nombre", original, original);
+					applySearchFilter();
+					return;
+				}
+				setProductoFieldError(id, "nombre", null);
+				setProductoField(id, "nombre", trimmed, original);
+				applySearchFilter();
+				return;
+			}
+
+			if (field === "precio") {
+				const precio = Number(el.value);
+				const original = parseOriginalPrecio(originalOf(el));
+				if (!Number.isFinite(precio) || precio < 0) {
+					setProductoFieldError(id, "precio", "Precio inválido");
+					setProductoField(id, "precio", original, original);
+					return;
+				}
+				setProductoFieldError(id, "precio", null);
+				setProductoField(id, "precio", Math.round(precio), original);
+				return;
+			}
+
+			if (field === "categoria") {
+				const raw = el.value;
+				const value = raw === "" ? null : raw;
+				const original = parseOriginalCategoria(originalOf(el));
+				if (value !== null && !categoriaIds.has(value)) {
+					setProductoFieldError(id, "categoria", "Categoría inválida");
+					setProductoField(id, "categoria", original, original);
+					return;
+				}
+				setProductoFieldError(id, "categoria", null);
+				setProductoField(id, "categoria", value, original);
+			}
+		}
+
+		tbody?.addEventListener("change", (e) => {
+			const t = e.target;
+			if (!(t instanceof HTMLInputElement || t instanceof HTMLSelectElement)) return;
+			if (!t.dataset.field) return;
+			applyField(t);
+		});
+
+		tbody?.addEventListener(
+			"blur",
+			(e) => {
+				const t = e.target;
+				if (!(t instanceof HTMLInputElement)) return;
+				if (!t.dataset.field) return;
+				applyField(t);
+			},
+			true,
+		);
+
+		function restoreDomFromOriginals() {
+			root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-field]").forEach((el) => {
+				const field = el.dataset.field;
+				const original = originalOf(el);
+				if (field === "nombre" || field === "precio" || field === "categoria") {
+					el.value = original;
+				}
+			});
+		}
+
+		function syncOriginalsFromPatch(id: string, patch: ProductoPatch) {
+			const row = root.querySelector<HTMLElement>(`[data-producto-row="${id}"]`);
+			if (!row) return;
+			if (patch.nombre !== undefined) {
+				const el = row.querySelector<HTMLInputElement>('[data-field="nombre"]');
+				if (el) {
+					el.dataset.original = patch.nombre;
+					el.value = patch.nombre;
+				}
+			}
+			if (patch.precio !== undefined) {
+				const el = row.querySelector<HTMLInputElement>('[data-field="precio"]');
+				if (el) {
+					el.dataset.original = String(patch.precio);
+					el.value = String(patch.precio);
+				}
+			}
+			if (patch.categoria !== undefined) {
+				const el = row.querySelector<HTMLSelectElement>('[data-field="categoria"]');
+				if (el) {
+					const v = patch.categoria ?? "";
+					el.dataset.original = v;
+					el.value = v;
+				}
+			}
+		}
+
+		discardBtn?.addEventListener("click", () => {
+			if (saving.get()) return;
+			restoreDomFromOriginals();
+			discardProductoEdits();
+			updateSticky();
+		});
+
+		saveBtn?.addEventListener("click", async () => {
+			if (!canWrite || saving.get()) return;
+			if (productosHasFieldErrors.get()) {
+				showToast("error", "Corregí los campos inválidos antes de guardar.");
+				return;
+			}
+			const changes = pending.get();
+			const ids = Object.keys(changes);
+			if (ids.length === 0) return;
+
+			saving.set(true);
+			try {
+				const result = await postBatchUpdate("/app/productos", changes);
+				const failedIds = new Set((result.failed ?? []).map((f) => f.id));
+				const savedIds = ids.filter((id) => !failedIds.has(id));
+
+				for (const id of savedIds) {
+					const patch = changes[id];
+					if (patch) syncOriginalsFromPatch(id, patch);
+				}
+				markProductosSaved(savedIds);
+
+				if (result.ok) {
+					showToast(
+						"success",
+						`${result.updated ?? savedIds.length} producto${(result.updated ?? savedIds.length) === 1 ? "" : "s"} actualizado${(result.updated ?? savedIds.length) === 1 ? "" : "s"}.`,
+					);
+				} else {
+					const failCount = result.failed?.length ?? 0;
+					showToast(
+						"error",
+						failCount
+							? `${result.updated ?? 0} guardados, ${failCount} fallaron.`
+							: (result.error ?? "No se pudieron guardar los cambios."),
+					);
+				}
+			} catch (err) {
+				showToast("error", err instanceof Error ? err.message : "Error de red");
+			} finally {
+				saving.set(false);
+			}
+		});
+
+		root.addEventListener("click", async (e) => {
+			const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-delete-id]");
+			if (!btn || !canWrite || saving.get()) return;
+			e.preventDefault();
+			const id = btn.dataset.deleteId;
+			const name = btn.dataset.deleteName ?? "este producto";
+			if (!id) return;
+			if (!confirm(`¿Eliminar “${name}”? Esta acción no se puede deshacer.`)) return;
+
+			try {
+				const result = await postDelete("/app/productos", id);
+				if (!result.ok) {
+					showToast("error", result.error ?? "No se pudo eliminar");
+					return;
+				}
+				dropProductoPending(id);
+				root.querySelector(`[data-producto-row="${id}"]`)?.remove();
+				applySearchFilter();
+				showToast("success", "Producto eliminado.");
+			} catch (err) {
+				showToast("error", err instanceof Error ? err.message : "Error de red");
+			}
+		});
+
+		window.addEventListener("beforeunload", (e) => {
+			if (productosPendingCount.get() > 0) {
+				e.preventDefault();
+				e.returnValue = "";
+			}
+		});
+	}
+
+	initProductosEditor();
+	document.addEventListener("astro:page-load", initProductosEditor);
+</script>
