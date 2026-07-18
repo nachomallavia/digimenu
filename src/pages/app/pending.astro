@@ -23,13 +23,18 @@ const error = Astro.url.searchParams.get("error");
 		<code class="text-sm">owner_restaurants</code> (user_id → emdash_restaurant_id /
 		slug).
 	</p>
-	<p class="text-sm">
-		<a href="/app/auth/logout" class="text-muted-foreground hover:text-foreground"
-			>Salir</a
-		>
-		{" · "}
+	<div class="flex items-center gap-2 text-sm">
+		<form method="POST" action="/app/auth/logout">
+			<button
+				type="submit"
+				class="cursor-pointer text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+			>
+				Salir
+			</button>
+		</form>
+		<span>·</span>
 		<a href="/app/login" class="text-muted-foreground hover:text-foreground"
 			>Volver al login</a
 		>
-	</p>
+	</div>
 </AppGuest>

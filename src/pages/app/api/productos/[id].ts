@@ -1,31 +1,35 @@
 import type { APIRoute } from "astro";
-import { requireOwner, revalidateOwnerSession } from "../../../../lib/auth/require-owner";
+import { requireOwner } from "../../../../lib/auth/require-owner";
 import {
 	assertProductoBelongsToRestaurant,
 	deleteProductoViaApi,
 	getProductoBySlug,
-	getProductoCategorias,
-	setProductoCategoriasViaApi,
+	listCategoriasForRestaurant,
 	updateProductoViaApi,
 } from "../../../../lib/emdash/client";
 
 export const prerender = false;
 
+function json(status: number, body: unknown): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "Content-Type": "application/json" },
+	});
+}
+
+function errorStatus(message: string): number {
+	return message.includes("EMDASH_API") ? 501 : 500;
+}
+
 export const GET: APIRoute = async ({ request, cookies, params }) => {
 	const auth = await requireOwner(request, cookies);
 	if (!auth.ok) {
-		return new Response(JSON.stringify({ error: "unauthorized", redirect: auth.redirect }), {
-			status: 401,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(401, { error: "unauthorized", redirect: auth.redirect });
 	}
 
 	const id = params.id;
 	if (!id) {
-		return new Response(JSON.stringify({ error: "id required" }), {
-			status: 400,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(400, { error: "id required" });
 	}
 
 	try {
@@ -34,118 +38,91 @@ export const GET: APIRoute = async ({ request, cookies, params }) => {
 			!entry ||
 			!assertProductoBelongsToRestaurant(entry, auth.owner.restaurant.emdash_restaurant_id)
 		) {
-			return new Response(JSON.stringify({ error: "not found" }), {
-				status: 404,
-				headers: { "Content-Type": "application/json" },
-			});
+			return json(404, { error: "not found" });
 		}
-		const categorias = await getProductoCategorias(entry.data.id);
-		return new Response(
-			JSON.stringify({
-				slug: entry.id,
-				id: entry.data.id,
-				nombre: entry.data.nombre,
-				descripcion: entry.data.descripcion ?? null,
-				precio: entry.data.precio,
-				imagen: entry.data.imagen ?? null,
-				status: entry.status,
-				categorias,
-			}),
-			{ status: 200, headers: { "Content-Type": "application/json" } },
-		);
+		return json(200, {
+			slug: entry.id,
+			id: entry.data.id,
+			nombre: entry.data.nombre,
+			descripcion: entry.data.descripcion ?? null,
+			precio: entry.data.precio,
+			imagen: entry.data.imagen ?? null,
+			categoriaId: entry.data.categoria ?? null,
+			status: entry.status,
+		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : "get failed";
-		return new Response(JSON.stringify({ error: message }), {
-			status: 500,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(500, { error: message });
 	}
 };
 
 export const PUT: APIRoute = async ({ request, cookies, params }) => {
 	const auth = await requireOwner(request, cookies);
 	if (!auth.ok) {
-		return new Response(JSON.stringify({ error: "unauthorized", redirect: auth.redirect }), {
-			status: 401,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(401, { error: "unauthorized", redirect: auth.redirect });
 	}
 
 	const id = params.id;
 	if (!id) {
-		return new Response(JSON.stringify({ error: "id required" }), {
-			status: 400,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(400, { error: "id required" });
 	}
 
 	let body: {
 		nombre?: string;
 		precio?: number;
 		descripcion?: string | null;
-		categoriaIds?: string[];
+		categoriaId?: string | null;
 	};
 	try {
 		body = await request.json();
 	} catch {
-		return new Response(JSON.stringify({ error: "invalid json" }), {
-			status: 400,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(400, { error: "invalid json" });
 	}
 
 	try {
+		const restaurantId = auth.owner.restaurant.emdash_restaurant_id;
 		const { entry } = await getProductoBySlug(id);
-		if (
-			!entry ||
-			!assertProductoBelongsToRestaurant(entry, auth.owner.restaurant.emdash_restaurant_id)
-		) {
-			return new Response(JSON.stringify({ error: "not found" }), {
-				status: 404,
-				headers: { "Content-Type": "application/json" },
-			});
+		if (!entry || !assertProductoBelongsToRestaurant(entry, restaurantId)) {
+			return json(404, { error: "not found" });
+		}
+
+		let categoria: string | null | undefined;
+		if (body.categoriaId !== undefined) {
+			if (body.categoriaId === null || body.categoriaId === "") {
+				categoria = null;
+			} else {
+				const { entries } = await listCategoriasForRestaurant(restaurantId);
+				const owned = entries.some((c) => c.data.id === body.categoriaId);
+				if (!owned) {
+					return json(400, { error: "categoria inválida" });
+				}
+				categoria = body.categoriaId;
+			}
 		}
 
 		const updated = await updateProductoViaApi(entry.data.id, {
 			nombre: body.nombre,
 			precio: body.precio,
 			descripcion: body.descripcion,
+			...(categoria !== undefined ? { categoria } : {}),
 		});
 
-		if (Array.isArray(body.categoriaIds)) {
-			await setProductoCategoriasViaApi(entry.data.id, body.categoriaIds);
-		}
-
-		await revalidateOwnerSession(request, cookies);
-		return new Response(JSON.stringify(updated), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(200, updated);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : "update failed";
-		const status = message.includes("EMDASH_API") ? 501 : 500;
-		return new Response(JSON.stringify({ error: message }), {
-			status,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(errorStatus(message), { error: message });
 	}
 };
 
 export const DELETE: APIRoute = async ({ request, cookies, params }) => {
 	const auth = await requireOwner(request, cookies);
 	if (!auth.ok) {
-		return new Response(JSON.stringify({ error: "unauthorized", redirect: auth.redirect }), {
-			status: 401,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(401, { error: "unauthorized", redirect: auth.redirect });
 	}
 
 	const id = params.id;
 	if (!id) {
-		return new Response(JSON.stringify({ error: "id required" }), {
-			status: 400,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(400, { error: "id required" });
 	}
 
 	try {
@@ -154,23 +131,12 @@ export const DELETE: APIRoute = async ({ request, cookies, params }) => {
 			!entry ||
 			!assertProductoBelongsToRestaurant(entry, auth.owner.restaurant.emdash_restaurant_id)
 		) {
-			return new Response(JSON.stringify({ error: "not found" }), {
-				status: 404,
-				headers: { "Content-Type": "application/json" },
-			});
+			return json(404, { error: "not found" });
 		}
 		await deleteProductoViaApi(entry.data.id);
-		await revalidateOwnerSession(request, cookies);
-		return new Response(JSON.stringify({ ok: true }), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(200, { ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : "delete failed";
-		const status = message.includes("EMDASH_API") ? 501 : 500;
-		return new Response(JSON.stringify({ error: message }), {
-			status,
-			headers: { "Content-Type": "application/json" },
-		});
+		return json(errorStatus(message), { error: message });
 	}
 };

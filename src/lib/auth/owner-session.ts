@@ -3,12 +3,16 @@ import type { AstroCookies } from "astro";
 export const OWNER_SESSION_COOKIE = "digimenu_owner";
 export const OWNER_SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 3; // 3 days
 
+/** Logo cached in the snapshot: `null` = no logo; `undefined` = unknown (old cookie). */
+export type OwnerSnapshotLogo = { src: string; alt?: string } | null;
+
 /** Restaurant fields cached in the owner cookie for light /app form GETs. */
 export type OwnerRestaurantSnapshot = {
 	nombre: string;
 	descripcion?: string | null;
 	menu_layout?: unknown;
 	theme?: unknown;
+	logo?: OwnerSnapshotLogo;
 };
 
 export type OwnerSessionPayload = {
@@ -74,6 +78,17 @@ async function hmacVerify(secret: string, data: string, signature: string): Prom
 	return mismatch === 0;
 }
 
+function parseSnapshotLogo(raw: unknown): OwnerSnapshotLogo | undefined {
+	if (raw === null) return null;
+	if (!raw || typeof raw !== "object") return undefined;
+	const obj = raw as Record<string, unknown>;
+	if (typeof obj.src !== "string") return undefined;
+	return {
+		src: obj.src,
+		alt: typeof obj.alt === "string" ? obj.alt : undefined,
+	};
+}
+
 function parseSnapshot(raw: unknown): OwnerRestaurantSnapshot | undefined {
 	if (!raw || typeof raw !== "object") return undefined;
 	const obj = raw as Record<string, unknown>;
@@ -90,6 +105,7 @@ function parseSnapshot(raw: unknown): OwnerRestaurantSnapshot | undefined {
 						: undefined,
 		menu_layout: obj.menu_layout,
 		theme: obj.theme,
+		logo: parseSnapshotLogo(obj.logo),
 	};
 }
 

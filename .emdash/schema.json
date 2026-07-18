@@ -1,0 +1,197 @@
+{
+  "collections": [
+    {
+      "slug": "categorias",
+      "label": "Categorías",
+      "labelSingular": "Categoría",
+      "supports": [
+        "drafts",
+        "revisions"
+      ],
+      "fields": [
+        {
+          "slug": "nombre",
+          "label": "Nombre",
+          "type": "string",
+          "required": true,
+          "unique": false
+        },
+        {
+          "slug": "restaurante",
+          "label": "Restaurante",
+          "type": "reference",
+          "required": true,
+          "unique": false,
+          "options": {
+            "collection": "restaurantes"
+          }
+        },
+        {
+          "slug": "icon",
+          "label": "Icono",
+          "type": "string",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "cover",
+          "label": "Portada",
+          "type": "image",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "orden",
+          "label": "Orden",
+          "type": "number",
+          "required": false,
+          "unique": false
+        }
+      ]
+    },
+    {
+      "slug": "pages",
+      "label": "Pages",
+      "labelSingular": "Page",
+      "supports": [
+        "drafts",
+        "revisions",
+        "search"
+      ],
+      "fields": [
+        {
+          "slug": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true,
+          "unique": false
+        },
+        {
+          "slug": "content",
+          "label": "Content",
+          "type": "portableText",
+          "required": false,
+          "unique": false
+        }
+      ]
+    },
+    {
+      "slug": "productos",
+      "label": "Productos",
+      "labelSingular": "Producto",
+      "supports": [
+        "drafts",
+        "revisions",
+        "search"
+      ],
+      "fields": [
+        {
+          "slug": "nombre",
+          "label": "Nombre",
+          "type": "string",
+          "required": true,
+          "unique": false
+        },
+        {
+          "slug": "descripcion",
+          "label": "Descripción",
+          "type": "text",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "precio",
+          "label": "Precio",
+          "type": "number",
+          "required": true,
+          "unique": false,
+          "validation": {
+            "min": 0
+          }
+        },
+        {
+          "slug": "imagen",
+          "label": "Imagen",
+          "type": "image",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "restaurante",
+          "label": "Restaurante",
+          "type": "reference",
+          "required": false,
+          "unique": false,
+          "options": {
+            "collection": "restaurantes"
+          }
+        },
+        {
+          "slug": "categoria",
+          "label": "Categoría",
+          "type": "reference",
+          "required": false,
+          "unique": false,
+          "options": {
+            "collection": "categorias"
+          }
+        }
+      ]
+    },
+    {
+      "slug": "restaurantes",
+      "label": "Restaurantes",
+      "labelSingular": "Restaurante",
+      "supports": [
+        "drafts",
+        "revisions",
+        "search"
+      ],
+      "fields": [
+        {
+          "slug": "nombre",
+          "label": "Nombre",
+          "type": "string",
+          "required": true,
+          "unique": false
+        },
+        {
+          "slug": "descripcion",
+          "label": "Descripción",
+          "type": "text",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "logo",
+          "label": "Logo",
+          "type": "image",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "menu_layout",
+          "label": "Tipo de menú",
+          "type": "json",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "theme",
+          "label": "Estilos del menú",
+          "type": "json",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "category_meta",
+          "label": "Metadatos de categorías",
+          "type": "json",
+          "required": false,
+          "unique": false
+        }
+      ]
+    }
+  ],
+  "version": "433589b6e5a97242"
+}

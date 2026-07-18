@@ -1,11 +1,32 @@
-import { getEmDashCollection, getEmDashEntry, getEntryTerms, getTaxonomyTerms } from "emdash";
+import { getEmDashCollection, getEmDashEntry } from "emdash";
 import { emdashJson, getEmDashApiConfig, writesEnabled } from "./api";
 import { parseMenuLayout, type MenuLayout } from "../menu-layout";
 import { parseRestaurantTheme, type RestaurantTheme } from "../restaurant-theme";
 
 export { writesEnabled };
 
-export type EmDashImage = { src: string; alt?: string } | null | undefined;
+export type EmDashImage = {
+	id?: string;
+	src?: string;
+	url?: string;
+	alt?: string;
+	width?: number;
+	height?: number;
+	storageKey?: string;
+	meta?: { storageKey?: string };
+} | null | undefined;
+
+/**
+ * Best displayable URL for an EmDash image value.
+ * Native image fields are stored as media references without `src`;
+ * fall back to the storage key route in that case.
+ */
+export function imageSrc(image: EmDashImage): string | undefined {
+	if (!image) return undefined;
+	if (image.src || image.url) return image.src ?? image.url;
+	const key = image.meta?.storageKey ?? image.storageKey;
+	return key ? `/_emdash/api/media/file/${key}` : undefined;
+}
 
 export type EmDashProducto = {
 	id: string;
@@ -18,6 +39,7 @@ export type EmDashProducto = {
 		precio: number;
 		imagen?: EmDashImage;
 		restaurante?: string;
+		categoria?: string | null;
 	};
 };
 
@@ -35,10 +57,18 @@ export type EmDashRestaurante = {
 	};
 };
 
-export type CategoriaTerm = {
+export type EmDashCategoria = {
 	id: string;
-	slug: string;
-	label: string;
+	slug: string | null;
+	status: string;
+	data: {
+		id: string;
+		nombre: string;
+		restaurante?: string;
+		icon?: string | null;
+		cover?: EmDashImage;
+		orden?: number | null;
+	};
 };
 
 type ContentApiResponse = {
@@ -53,17 +83,72 @@ type ContentApiResponse = {
 	_rev?: string;
 };
 
-type TermApiResponse = {
-	term?: { id: string; slug: string; label: string };
-	id?: string;
-	slug?: string;
-	label?: string;
-};
-
 function requireWrites() {
 	if (!getEmDashApiConfig()) {
 		throw new Error("EMDASH_API_BASE and EMDASH_API_TOKEN required for writes");
 	}
+}
+
+/** Non-empty File from multipart form field, or null. */
+export function formImageFile(form: FormData, name: string): File | null {
+	const value = form.get(name);
+	if (value instanceof File && value.size > 0) return value;
+	return null;
+}
+
+type MediaUploadItem = {
+	id: string;
+	filename?: string;
+	mimeType?: string;
+	mime_type?: string;
+	storageKey?: string;
+	storage_key?: string;
+	url?: string;
+	src?: string;
+	width?: number;
+	height?: number;
+};
+
+type MediaUploadResponse = {
+	item?: MediaUploadItem;
+	id?: string;
+};
+
+export function mediaItemToImageValue(
+	item: MediaUploadItem,
+	alt: string,
+): { id: string; src?: string; url?: string; alt: string; width?: number; height?: number } {
+	const storageKey = item.storageKey ?? item.storage_key;
+	const src =
+		item.url ??
+		item.src ??
+		(storageKey ? `/_emdash/api/media/file/${storageKey}` : undefined);
+	return {
+		id: item.id,
+		src,
+		url: item.url ?? src,
+		alt,
+		width: item.width,
+		height: item.height,
+	};
+}
+
+export async function uploadMediaViaApi(file: File, alt?: string) {
+	requireWrites();
+	const body = new FormData();
+	body.append("file", file, file.name || "upload");
+	if (alt) body.append("alt", alt);
+
+	const data = await emdashJson<MediaUploadResponse>("/_emdash/api/media", {
+		method: "POST",
+		body,
+	});
+
+	const item = data.item ?? (data.id ? (data as MediaUploadItem) : null);
+	if (!item?.id) {
+		throw new Error("EmDash media upload did not return an item id");
+	}
+	return mediaItemToImageValue(item, alt ?? file.name ?? "Imagen");
 }
 
 /**
@@ -109,30 +194,108 @@ export function restauranteTheme(entry: EmDashRestaurante): RestaurantTheme {
 	return parseRestaurantTheme(entry.data.theme);
 }
 
-export async function listCategorias() {
-	const terms = await getTaxonomyTerms("categoria");
-	return terms.map((t) => ({
-		id: t.id,
-		slug: t.slug,
-		label: t.label,
-	})) as CategoriaTerm[];
+// ---------- Categorías (collection, per-restaurant) ----------
+
+function sortCategorias(entries: EmDashCategoria[]): EmDashCategoria[] {
+	return [...entries].sort((a, b) => {
+		const oa = a.data.orden ?? Number.MAX_SAFE_INTEGER;
+		const ob = b.data.orden ?? Number.MAX_SAFE_INTEGER;
+		if (oa !== ob) return oa - ob;
+		return (a.data.nombre ?? "").localeCompare(b.data.nombre ?? "");
+	});
 }
 
-export async function getProductoCategorias(productoUlid: string) {
-	const terms = await getEntryTerms("productos", productoUlid, "categoria");
-	return terms.map((t) => ({
-		id: t.id,
-		slug: t.slug,
-		label: t.label,
-	})) as CategoriaTerm[];
+/**
+ * List categorías of one restaurant, ordered by `orden`.
+ * In-process read — no PAT required.
+ */
+export async function listCategoriasForRestaurant(restaurantId: string) {
+	const { entries, cacheHint, error } = await getEmDashCollection("categorias", {
+		where: { restaurante: restaurantId },
+		limit: 100,
+	});
+	if (error) throw new Error(error.message ?? "Failed to list categorias");
+	return { entries: sortCategorias(entries as EmDashCategoria[]), cacheHint };
 }
 
-async function getContentRev(collection: string, id: string): Promise<string | undefined> {
-	const res = await emdashJson<ContentApiResponse>(
-		`/_emdash/api/content/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`,
+export async function getCategoriaBySlug(idOrSlug: string) {
+	const { entry, cacheHint, error } = await getEmDashEntry("categorias", idOrSlug);
+	if (error) throw new Error(error.message ?? "Failed to get categoria");
+	return { entry: entry as EmDashCategoria | null, cacheHint };
+}
+
+export function assertCategoriaBelongsToRestaurant(
+	categoria: EmDashCategoria,
+	restaurantId: string,
+): boolean {
+	return categoria.data.restaurante === restaurantId;
+}
+
+export async function createCategoriaViaApi(input: {
+	nombre: string;
+	restauranteId: string;
+	icon?: string | null;
+	cover?: EmDashImage | null;
+	orden?: number;
+	slug?: string;
+}) {
+	requireWrites();
+	const slug =
+		input.slug?.trim() ||
+		input.nombre
+			.toLowerCase()
+			.normalize("NFD")
+			.replace(/[\u0300-\u036f]/g, "")
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "");
+	const created = await emdashJson<ContentApiResponse>("/_emdash/api/content/categorias", {
+		method: "POST",
+		body: JSON.stringify({
+			slug: slug || undefined,
+			data: {
+				nombre: input.nombre,
+				restaurante: input.restauranteId,
+				icon: input.icon ?? null,
+				cover: input.cover ?? null,
+				orden: input.orden ?? 0,
+			},
+		}),
+	});
+	if (created.item?.id) {
+		await publishContent("categorias", created.item.id);
+	}
+	return created;
+}
+
+export async function updateCategoriaViaApi(
+	id: string,
+	data: {
+		nombre?: string;
+		icon?: string | null;
+		cover?: EmDashImage | null;
+		orden?: number;
+	},
+) {
+	requireWrites();
+	const updated = await emdashJson<ContentApiResponse>(
+		`/_emdash/api/content/categorias/${encodeURIComponent(id)}`,
+		{
+			method: "PUT",
+			body: JSON.stringify({ data }),
+		},
 	);
-	return res._rev;
+	await publishContent("categorias", id);
+	return updated;
 }
+
+export async function deleteCategoriaViaApi(id: string) {
+	requireWrites();
+	return emdashJson(`/_emdash/api/content/categorias/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+	});
+}
+
+// ---------- Productos (writes) ----------
 
 async function publishContent(collection: string, id: string) {
 	try {
@@ -150,6 +313,7 @@ export async function createProductoViaApi(input: {
 	precio: number;
 	descripcion?: string;
 	restauranteId: string;
+	categoriaId?: string | null;
 	slug?: string;
 }) {
 	requireWrites();
@@ -157,12 +321,12 @@ export async function createProductoViaApi(input: {
 		method: "POST",
 		body: JSON.stringify({
 			slug: input.slug,
-			status: "published",
 			data: {
 				nombre: input.nombre,
 				precio: input.precio,
 				descripcion: input.descripcion,
 				restaurante: input.restauranteId,
+				...(input.categoriaId !== undefined ? { categoria: input.categoriaId } : {}),
 			},
 		}),
 	});
@@ -178,15 +342,16 @@ export async function updateProductoViaApi(
 		nombre?: string;
 		precio?: number;
 		descripcion?: string | null;
+		imagen?: EmDashImage | null;
+		categoria?: string | null;
 	},
 ) {
 	requireWrites();
-	const _rev = await getContentRev("productos", id);
 	const updated = await emdashJson<ContentApiResponse>(
 		`/_emdash/api/content/productos/${encodeURIComponent(id)}`,
 		{
 			method: "PUT",
-			body: JSON.stringify({ data, _rev }),
+			body: JSON.stringify({ data }),
 		},
 	);
 	await publishContent("productos", id);
@@ -205,65 +370,15 @@ export async function updateRestauranteViaApi(
 	data: Record<string, unknown>,
 ) {
 	requireWrites();
-	const _rev = await getContentRev("restaurantes", id);
 	const updated = await emdashJson<ContentApiResponse>(
 		`/_emdash/api/content/restaurantes/${encodeURIComponent(id)}`,
 		{
 			method: "PUT",
-			body: JSON.stringify({ data, _rev }),
+			body: JSON.stringify({ data }),
 		},
 	);
 	await publishContent("restaurantes", id);
 	return updated;
-}
-
-export async function setProductoCategoriasViaApi(productoId: string, termIds: string[]) {
-	requireWrites();
-	return emdashJson(
-		`/_emdash/api/content/productos/${encodeURIComponent(productoId)}/terms/categoria`,
-		{
-			method: "POST",
-			body: JSON.stringify({ termIds }),
-		},
-	);
-}
-
-export async function createCategoriaViaApi(input: { label: string; slug?: string }) {
-	requireWrites();
-	const slug =
-		input.slug?.trim() ||
-		input.label
-			.toLowerCase()
-			.normalize("NFD")
-			.replace(/[\u0300-\u036f]/g, "")
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-|-$/g, "");
-	return emdashJson<TermApiResponse>("/_emdash/api/taxonomies/categoria/terms", {
-		method: "POST",
-		body: JSON.stringify({ slug, label: input.label }),
-	});
-}
-
-export async function updateCategoriaViaApi(
-	slug: string,
-	input: { label?: string; slug?: string },
-) {
-	requireWrites();
-	return emdashJson<TermApiResponse>(
-		`/_emdash/api/taxonomies/categoria/terms/${encodeURIComponent(slug)}`,
-		{
-			method: "PUT",
-			body: JSON.stringify(input),
-		},
-	);
-}
-
-export async function deleteCategoriaViaApi(slug: string) {
-	requireWrites();
-	return emdashJson(
-		`/_emdash/api/taxonomies/categoria/terms/${encodeURIComponent(slug)}`,
-		{ method: "DELETE" },
-	);
 }
 
 export function assertProductoBelongsToRestaurant(

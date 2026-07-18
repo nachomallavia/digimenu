@@ -1,13 +1,21 @@
 ---
 import Dashboard from "../../layouts/Dashboard.astro";
-import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
+import CategoryIcon from "../../components/CategoryIcon.astro";
+import { requireOwner } from "../../lib/auth/require-owner";
 import {
+	assertCategoriaBelongsToRestaurant,
 	createCategoriaViaApi,
 	deleteCategoriaViaApi,
+	formImageFile,
+	getCategoriaBySlug,
+	listCategoriasForRestaurant,
 	updateCategoriaViaApi,
+	uploadMediaViaApi,
 	writesEnabled,
+	type EmDashImage,
 } from "../../lib/emdash/client";
 import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
+import { CATEGORY_ICON_OPTIONS, isCategoryIconId } from "../../lib/category-icons";
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
 import { Label } from "@/components/starwind/label";
@@ -25,6 +33,16 @@ const canWrite = writesEnabled();
 let error: string | null = null;
 const saved = Astro.url.searchParams.get("saved") === "1";
 const savedAction = Astro.url.searchParams.get("action");
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+
+/** Load an owned categoria or throw (also guards cross-tenant access). */
+async function ownedCategoria(slug: string) {
+	const { entry } = await getCategoriaBySlug(slug);
+	if (!entry || !assertCategoriaBelongsToRestaurant(entry, restaurantId)) {
+		throw new Error("Categoría no encontrada.");
+	}
+	return entry;
+}
 
 if (Astro.request.method === "POST") {
 	const form = await Astro.request.formData();
@@ -37,21 +55,47 @@ if (Astro.request.method === "POST") {
 			if (action === "create") {
 				const label = String(form.get("label") ?? "").trim();
 				if (!label) throw new Error("El nombre es obligatorio.");
-				await createCategoriaViaApi({ label });
-				await revalidateOwnerSession(Astro.request, Astro.cookies);
+				const { entries } = await listCategoriasForRestaurant(restaurantId);
+				const maxOrden = entries.reduce(
+					(max, c) => Math.max(max, c.data.orden ?? 0),
+					-1,
+				);
+				await createCategoriaViaApi({
+					nombre: label,
+					restauranteId: restaurantId,
+					orden: maxOrden + 1,
+				});
 				return Astro.redirect(savedRedirect("/app/categorias", { action: "create" }));
-			} else if (action === "rename") {
+			} else if (action === "save") {
 				const slug = String(form.get("slug") ?? "");
 				const label = String(form.get("label") ?? "").trim();
 				if (!slug || !label) throw new Error("Datos incompletos.");
-				await updateCategoriaViaApi(slug, { label });
-				await revalidateOwnerSession(Astro.request, Astro.cookies);
-				return Astro.redirect(savedRedirect("/app/categorias", { action: "rename" }));
+
+				const entry = await ownedCategoria(slug);
+
+				const iconRaw = String(form.get("icon") ?? "").trim();
+				const icon = iconRaw && isCategoryIconId(iconRaw) ? iconRaw : null;
+				const removeCover = form.get("remove_cover") === "1";
+				const coverFile = formImageFile(form, "cover");
+
+				let cover: EmDashImage | undefined;
+				if (removeCover) {
+					cover = null;
+				} else if (coverFile) {
+					cover = await uploadMediaViaApi(coverFile, label);
+				}
+
+				await updateCategoriaViaApi(entry.data.id, {
+					nombre: label,
+					icon,
+					...(cover !== undefined ? { cover } : {}),
+				});
+				return Astro.redirect(savedRedirect("/app/categorias", { action: "save" }));
 			} else if (action === "delete") {
 				const slug = String(form.get("slug") ?? "");
 				if (!slug) throw new Error("Slug requerido.");
-				await deleteCategoriaViaApi(slug);
-				await revalidateOwnerSession(Astro.request, Astro.cookies);
+				const entry = await ownedCategoria(slug);
+				await deleteCategoriaViaApi(entry.data.id);
 				return Astro.redirect(savedRedirect("/app/categorias", { action: "delete" }));
 			}
 		} catch (err) {
@@ -60,13 +104,14 @@ if (Astro.request.method === "POST") {
 	}
 }
 
+// List renders client-side from /app/api/categorias (sessionStorage SWR) —
+// SSR stays cookie-only so navigations are light on Workers.
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
-const restaurantId = owner.restaurant.emdash_restaurant_id;
 
 const message = saved
 	? savedAction === "delete"
 		? "Categoría eliminada."
-		: savedAction === "rename"
+		: savedAction === "save"
 			? "Categoría actualizada."
 			: "Categoría creada."
 	: null;
@@ -81,7 +126,9 @@ const message = saved
 	<div class="mx-auto flex max-w-2xl flex-col gap-6">
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">Categorías</h1>
-			<p class="text-muted-foreground">Secciones del menú (taxonomy <code>categoria</code>).</p>
+			<p class="text-muted-foreground">
+				Secciones del menú. Opcionalmente elegí un icono y/o una imagen de portada.
+			</p>
 		</div>
 
 		{message && <p class="text-sm text-success">{message}</p>}
@@ -112,20 +159,88 @@ const message = saved
 			</CardHeader>
 			<CardContent
 				id="owner-categorias-list"
-				class="flex flex-col gap-4"
+				class="flex flex-col gap-6"
 				data-restaurant-id={restaurantId}
-				data-can-write={canWrite ? "1" : "0"}
 				aria-live="polite"
 			>
 				<p class="text-sm text-muted-foreground">Cargando categorías…</p>
 			</CardContent>
 		</Card>
 	</div>
+
+	{/* Per-category form, cloned client-side for each row. */}
+	<template id="categoria-item-template">
+		<div class="flex flex-col gap-4 border-b border-border pb-6 last:border-0 last:pb-0">
+			<form method="POST" class="flex flex-col gap-3" enctype="multipart/form-data">
+				<input type="hidden" name="action" value="save" />
+				<input type="hidden" name="slug" value="" />
+
+				<div class="flex min-w-0 items-center gap-2">
+					<span data-icon-slot class="hidden shrink-0"></span>
+					<span
+						data-slug-badge
+						class="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium"
+					></span>
+					<Input name="label" required disabled={!canWrite} class="min-w-0" />
+				</div>
+
+				<div class="flex flex-col gap-1.5">
+					<Label>Icono (opcional)</Label>
+					<select
+						name="icon"
+						disabled={!canWrite}
+						class="border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+					>
+						<option value="">Sin icono</option>
+						{CATEGORY_ICON_OPTIONS.map((opt) => (
+							<option value={opt.id}>{opt.label}</option>
+						))}
+					</select>
+				</div>
+
+				<div class="flex flex-col gap-2">
+					<Label>Portada (opcional)</Label>
+					<img
+						data-cover-preview
+						alt=""
+						class="hidden h-24 w-full max-w-sm rounded-md border border-border object-cover"
+					/>
+					<Input name="cover" type="file" accept="image/*" disabled={!canWrite} />
+					<label data-remove-cover class="hidden items-center gap-2 text-sm">
+						<input type="checkbox" name="remove_cover" value="1" disabled={!canWrite} />
+						Quitar portada
+					</label>
+				</div>
+
+				<div class="flex flex-wrap gap-2">
+					<Button type="submit" variant="primary" size="sm" disabled={!canWrite}>
+						Guardar
+					</Button>
+				</div>
+			</form>
+
+			<form method="POST" enctype="application/x-www-form-urlencoded">
+				<input type="hidden" name="action" value="delete" />
+				<input type="hidden" name="slug" value="" />
+				<Button type="submit" variant="ghost" size="sm" disabled={!canWrite}>
+					Eliminar categoría
+				</Button>
+			</form>
+		</div>
+	</template>
+
+	{/* SVG sprite so the client script can clone curated Tabler icons. */}
+	<div id="categoria-icon-sprite" class="hidden" aria-hidden="true">
+		{CATEGORY_ICON_OPTIONS.map((opt) => (
+			<span data-icon={opt.id}>
+				<CategoryIcon icon={opt.id} class="size-5 shrink-0" />
+			</span>
+		))}
+	</div>
 </Dashboard>
 
 <script>
 	import {
-		bustOwnerListCaches,
 		categoriasCacheKey,
 		fetchCategorias,
 		shouldBustFromUrl,
@@ -134,48 +249,74 @@ const message = saved
 	} from "../../lib/app/owner-browser-cache";
 
 	const root = document.getElementById("owner-categorias-list");
-	if (root) {
-		const restaurantId = root.dataset.restaurantId ?? "";
-		const canWrite = root.dataset.canWrite === "1";
+	const template = document.getElementById(
+		"categoria-item-template",
+	) as HTMLTemplateElement | null;
+	const sprite = document.getElementById("categoria-icon-sprite");
 
-		function escapeAttr(value: string) {
-			return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+	if (root && template) {
+		const restaurantId = root.dataset.restaurantId ?? "";
+		let renderedJson: string | null = null;
+
+		function buildRow(row: OwnerCategoriaRow): DocumentFragment {
+			const node = template!.content.cloneNode(true) as DocumentFragment;
+
+			node.querySelectorAll<HTMLInputElement>('input[name="slug"]').forEach((el) => {
+				el.value = row.slug;
+			});
+
+			const badge = node.querySelector("[data-slug-badge]");
+			if (badge) badge.textContent = row.slug;
+
+			const label = node.querySelector<HTMLInputElement>('input[name="label"]');
+			if (label) label.value = row.label;
+
+			const select = node.querySelector<HTMLSelectElement>('select[name="icon"]');
+			if (select) select.value = row.icon ?? "";
+
+			const iconSlot = node.querySelector("[data-icon-slot]");
+			const iconSvg = row.icon
+				? sprite?.querySelector(`[data-icon="${row.icon}"] svg`)
+				: null;
+			if (iconSlot && iconSvg) {
+				iconSlot.appendChild(iconSvg.cloneNode(true));
+				iconSlot.classList.remove("hidden");
+			}
+
+			if (row.coverSrc) {
+				const cover = node.querySelector<HTMLImageElement>("[data-cover-preview]");
+				if (cover) {
+					cover.src = row.coverSrc;
+					cover.alt = row.label;
+					cover.classList.remove("hidden");
+				}
+				const removeCover = node.querySelector("[data-remove-cover]");
+				if (removeCover) {
+					removeCover.classList.remove("hidden");
+					removeCover.classList.add("flex");
+				}
+			}
+
+			return node;
 		}
 
-		function render(cats: OwnerCategoriaRow[]) {
-			if (cats.length === 0) {
+		function render(rows: OwnerCategoriaRow[]) {
+			// Skip identical re-renders so a background refresh doesn't wipe edits in progress.
+			const json = JSON.stringify(rows);
+			if (json === renderedJson) return;
+			renderedJson = json;
+
+			if (rows.length === 0) {
 				root!.innerHTML =
 					'<p class="text-sm text-muted-foreground">No hay categorías todavía.</p>';
 				return;
 			}
-
-			root!.innerHTML = cats
-				.map((cat) => {
-					const disabled = canWrite ? "" : "disabled";
-					return `
-				<div class="flex flex-col gap-3 border-b border-border pb-4 last:border-0 last:pb-0 sm:flex-row sm:items-center">
-					<form method="POST" class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center" enctype="application/x-www-form-urlencoded">
-						<input type="hidden" name="action" value="rename" />
-						<input type="hidden" name="slug" value="${escapeAttr(cat.slug)}" />
-						<div class="flex min-w-0 flex-1 items-center gap-2">
-							<span class="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium">${escapeAttr(cat.slug)}</span>
-							<input name="label" value="${escapeAttr(cat.label)}" required ${disabled} class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs transition-colors focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" />
-						</div>
-						<button type="submit" ${disabled} class="border-input bg-background hover:bg-accent hover:text-accent-foreground inline-flex h-8 items-center justify-center rounded-md border px-3 text-sm font-medium shadow-xs disabled:pointer-events-none disabled:opacity-50">Renombrar</button>
-					</form>
-					<form method="POST" enctype="application/x-www-form-urlencoded">
-						<input type="hidden" name="action" value="delete" />
-						<input type="hidden" name="slug" value="${escapeAttr(cat.slug)}" />
-						<button type="submit" ${disabled} class="hover:bg-accent hover:text-accent-foreground inline-flex h-8 items-center justify-center rounded-md px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-50">Eliminar</button>
-					</form>
-				</div>`;
-				})
-				.join("");
+			const frag = document.createDocumentFragment();
+			for (const row of rows) frag.appendChild(buildRow(row));
+			root!.replaceChildren(frag);
 		}
 
 		const bust = shouldBustFromUrl();
-		if (bust) bustOwnerListCaches(restaurantId);
-
 		void swrLoad({
 			key: categoriasCacheKey(restaurantId),
 			bust,
@@ -184,7 +325,7 @@ const message = saved
 				root!.innerHTML =
 					'<p class="text-sm text-muted-foreground">Cargando categorías…</p>';
 			},
-			onData: (cats) => render(cats),
+			onData: (rows) => render(rows),
 			onError: () => {
 				root!.innerHTML =
 					'<p class="text-sm text-error">No se pudieron cargar las categorías.</p>';

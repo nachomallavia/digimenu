@@ -1,6 +1,6 @@
 ---
 import Dashboard from "../../../layouts/Dashboard.astro";
-import { requireOwner, revalidateOwnerSession } from "../../../lib/auth/require-owner";
+import { requireOwner } from "../../../lib/auth/require-owner";
 import { createProductoViaApi, writesEnabled } from "../../../lib/emdash/client";
 import { loadOwnerRestaurant } from "../../../lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
@@ -38,7 +38,6 @@ if (Astro.request.method === "POST") {
 				descripcion: descripcion || undefined,
 				restauranteId: owner.restaurant.emdash_restaurant_id,
 			});
-			await revalidateOwnerSession(Astro.request, Astro.cookies);
 			return Astro.redirect(
 				`/app/productos/${created.item.slug ?? created.item.id}?fresh=1`,
 			);

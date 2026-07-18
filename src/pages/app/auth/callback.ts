@@ -70,5 +70,7 @@ export const GET: APIRoute = async ({ request, cookies, redirect, url }) => {
 		restaurantSnapshot,
 	});
 
-	return redirect(next.startsWith("/") ? next : "/app");
+	// Only allow same-origin paths ("//host" would be a protocol-relative redirect).
+	const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/app";
+	return redirect(safeNext);
 };

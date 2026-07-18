@@ -49,6 +49,45 @@
 			]
 		},
 		{
+			"slug": "categorias",
+			"label": "Categorías",
+			"labelSingular": "Categoría",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "nombre",
+					"label": "Nombre",
+					"type": "string",
+					"required": true,
+					"searchable": true
+				},
+				{
+					"slug": "restaurante",
+					"label": "Restaurante",
+					"type": "reference",
+					"required": true,
+					"options": {
+						"collection": "restaurantes"
+					}
+				},
+				{
+					"slug": "icon",
+					"label": "Icono",
+					"type": "string"
+				},
+				{
+					"slug": "cover",
+					"label": "Portada",
+					"type": "image"
+				},
+				{
+					"slug": "orden",
+					"label": "Orden",
+					"type": "number"
+				}
+			]
+		},
+		{
 			"slug": "productos",
 			"label": "Productos",
 			"labelSingular": "Producto",
@@ -87,6 +126,14 @@
 					"options": {
 						"collection": "restaurantes"
 					}
+				},
+				{
+					"slug": "categoria",
+					"label": "Categoría",
+					"type": "reference",
+					"options": {
+						"collection": "categorias"
+					}
 				}
 			]
 		},
@@ -113,33 +160,7 @@
 			]
 		}
 	],
-	"taxonomies": [
-		{
-			"name": "categoria",
-			"label": "Categorías",
-			"labelSingular": "Categoría",
-			"hierarchical": false,
-			"collections": ["productos"],
-			"terms": [
-				{
-					"slug": "tapeos",
-					"label": "TAPEOS"
-				},
-				{
-					"slug": "sin-alcohol",
-					"label": "SIN ALCOHOL"
-				},
-				{
-					"slug": "cafe-solo",
-					"label": "CAFÉ SOLO"
-				},
-				{
-					"slug": "cafe-espresso-leche",
-					"label": "CAFÉ ESPRESSO + LECHE"
-				}
-			]
-		}
-	],
+	"taxonomies": [],
 	"menus": [
 		{
 			"name": "primary",
@@ -182,6 +203,48 @@
 				}
 			}
 		],
+		"categorias": [
+			{
+				"id": "tapeos",
+				"slug": "tapeos",
+				"status": "published",
+				"data": {
+					"nombre": "TAPEOS",
+					"restaurante": "$ref:finca",
+					"orden": 0
+				}
+			},
+			{
+				"id": "sin-alcohol",
+				"slug": "sin-alcohol",
+				"status": "published",
+				"data": {
+					"nombre": "SIN ALCOHOL",
+					"restaurante": "$ref:finca",
+					"orden": 1
+				}
+			},
+			{
+				"id": "cafe-solo",
+				"slug": "cafe-solo",
+				"status": "published",
+				"data": {
+					"nombre": "CAFÉ SOLO",
+					"restaurante": "$ref:finca",
+					"orden": 2
+				}
+			},
+			{
+				"id": "cafe-espresso-leche",
+				"slug": "cafe-espresso-leche",
+				"status": "published",
+				"data": {
+					"nombre": "CAFÉ ESPRESSO + LECHE",
+					"restaurante": "$ref:finca",
+					"orden": 3
+				}
+			}
+		],
 		"productos": [
 			{
 				"id": "pate-de-girgolas",
@@ -191,10 +254,8 @@
 					"nombre": "Pate de Girgolas",
 					"descripcion": "Pate cremoso de hongos Girgola, acompañado de crutons de pan ciabatta con pesto y queso gouda gratinado",
 					"precio": 18000,
-					"restaurante": "$ref:finca"
-				},
-				"taxonomies": {
-					"categoria": ["tapeos"]
+					"restaurante": "$ref:finca",
+					"categoria": "$ref:tapeos"
 				}
 			},
 			{
@@ -205,10 +266,8 @@
 					"nombre": "Burrata",
 					"descripcion": "Colchón de tomates confitados, burrata, pesto de albahaca. Reducción de dulce de rosa mosqueta y naranja, acompañado de crutons gratinados con queso gouda",
 					"precio": 20000,
-					"restaurante": "$ref:finca"
-				},
-				"taxonomies": {
-					"categoria": ["tapeos"]
+					"restaurante": "$ref:finca",
+					"categoria": "$ref:tapeos"
 				}
 			},
 			{
@@ -218,10 +277,8 @@
 				"data": {
 					"nombre": "Coca-Cola / Coca Zero",
 					"precio": 4500,
-					"restaurante": "$ref:finca"
-				},
-				"taxonomies": {
-					"categoria": ["sin-alcohol"]
+					"restaurante": "$ref:finca",
+					"categoria": "$ref:sin-alcohol"
 				}
 			},
 			{
@@ -231,10 +288,8 @@
 				"data": {
 					"nombre": "Espresso",
 					"precio": 4000,
-					"restaurante": "$ref:finca"
-				},
-				"taxonomies": {
-					"categoria": ["cafe-solo"]
+					"restaurante": "$ref:finca",
+					"categoria": "$ref:cafe-solo"
 				}
 			},
 			{
@@ -245,10 +300,8 @@
 					"nombre": "Flat White",
 					"descripcion": "Espresso con leche finamente texturizada que realza el sabor (160ml)",
 					"precio": 7000,
-					"restaurante": "$ref:finca"
-				},
-				"taxonomies": {
-					"categoria": ["cafe-espresso-leche"]
+					"restaurante": "$ref:finca",
+					"categoria": "$ref:cafe-espresso-leche"
 				}
 			}
 		],

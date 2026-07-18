@@ -15,6 +15,8 @@ export type OwnerCategoriaRow = {
 	id: string;
 	slug: string;
 	label: string;
+	icon?: string | null;
+	coverSrc?: string | null;
 };
 
 const PREFIX = "digimenu:owner:";

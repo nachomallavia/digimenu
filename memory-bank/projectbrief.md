@@ -10,7 +10,7 @@ DigiMenu is a SaaS that lets restaurant owners create, update, style, and custom
 - Owner app at `/app` (not EmDash admin) for day-to-day edits
 
 ## Phase 1 (current)
-- Schema: restaurantes, productos, pages; taxonomy `categoria`
+- Schema: restaurantes, categorias (colección per-restaurant), productos, pages
 - Public menu `/m/[slug]` with layout + theme
 - Owner auth: Supabase magic link + `owner_restaurants` mapping
 - Owner dashboard CRUD via DigiMenu BFF + session cookie

@@ -16,7 +16,7 @@ The admin UI is at `http://localhost:4321/_emdash/admin`.
 | ------------------------ | ---------------------------------------------------------------------------------- |
 | `astro.config.mjs`       | Astro config with `emdash()` integration, database, storage, DigiMenu plugin       |
 | `src/live.config.ts`     | EmDash loader registration (boilerplate -- don't modify)                           |
-| `seed/seed.json`         | Schema + demo content (restaurantes, productos, categoria)                         |
+| `seed/seed.json`         | Schema + demo content (restaurantes, categorias, productos)                        |
 | `emdash-env.d.ts`        | Generated types for collections (auto-regenerated on dev server start)             |
 | `src/layouts/Root.astro` | Shared HTML shell + Starwind defaults |
 | `src/layouts/Menu.astro` | Public / customer menu chrome (+ theme hook) |
@@ -45,9 +45,9 @@ The EmDash docs are available as an MCP server at `https://docs.emdashcms.com/mc
 
 - All content pages must be server-rendered (`output: "server"`). No `getStaticPaths()` for CMS content.
 - Image fields are objects (`{ src, alt }`). Use `<Image image={...} />` from `"emdash/ui"`.
-- `entry.id` is the slug (for URLs). `entry.data.id` is the database ULID (for API calls like `getEntryTerms`).
+- `entry.id` is the slug (for URLs). `entry.data.id` is the database ULID (for reference fields and API calls).
 - Always call `Astro.cache.set(cacheHint)` on pages that query content.
-- Taxonomy names in queries must match the seed's `"name"` field exactly (e.g., `"categoria"`).
+- Categories are a regular collection (`categorias`) scoped per restaurant — there is no taxonomy.
 
 ## Pages
 
@@ -60,9 +60,9 @@ The EmDash docs are available as an MCP server at `https://docs.emdashcms.com/mc
 ## Schema
 
 - `restaurantes`: `nombre` (req), `descripcion`, `logo` (optional), `menu_layout` (json), `theme` (json).
-- `productos`: `nombre`, `precio` (req), `descripcion`, `imagen`, `restaurante` (reference; auto-filled by plugin when empty and only one restaurant exists).
+- `categorias`: `nombre` (req), `restaurante` (reference, req), `icon` (string, Tabler id), `cover` (image), `orden` (integer; menu section order).
+- `productos`: `nombre`, `precio` (req), `descripcion`, `imagen`, `restaurante` (reference; auto-filled by plugin when empty and only one restaurant exists), `categoria` (reference → categorias, optional; one per product).
 - `pages`: `title`, `content` (Portable Text).
-- Taxonomy: `categoria` → `productos`.
 - Single `primary` menu.
 
 Site settings: Digimenu title, dateFormat `DD/MM/YY`.
@@ -73,4 +73,4 @@ See `docs/owner-dashboard.md`. Shell: Sidebar + View Transitions. Mutations need
 
 ## Worker sync note
 
-Seed only applies to an empty DB. Production D1 already initialized must be aligned via MCP (`user-emdashWorker`) / admin: create `restaurantes`, add `restaurante` + `imagen` fields to `productos`, create taxonomy `categoria`, then enter content manually.
+Seed only applies to an empty DB. Production D1 already initialized must be aligned via MCP (`user-emdashWorker`) / admin. Current production schema matches local: `categorias` collection + `productos.categoria` reference (migrated 2026-07-17; old taxonomy `categoria` and `restaurantes.category_meta` removed). For local re-migrations see `scripts/migrate-categorias.mjs`.

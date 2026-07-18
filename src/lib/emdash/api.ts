@@ -51,7 +51,8 @@ export async function emdashFetch(
 	const headers = new Headers(init.headers);
 	headers.set("Authorization", `Bearer ${config.token}`);
 	headers.set("Accept", "application/json");
-	if (init.body && !headers.has("Content-Type")) {
+	// FormData must set its own multipart boundary — do not force JSON.
+	if (init.body && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
 		headers.set("Content-Type", "application/json");
 	}
 

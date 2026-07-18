@@ -12,3 +12,4 @@ data.db
 !.env.example
 .dev.vars
 .dev.vars.*
+tmp/

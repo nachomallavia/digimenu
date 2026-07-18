@@ -1,5 +1,5 @@
 import type { AstroCookies } from "astro";
-import { getRestauranteById, type EmDashRestaurante } from "../emdash/client";
+import { getRestauranteById, imageSrc, type EmDashRestaurante } from "../emdash/client";
 import {
 	readOwnerSessionCookie,
 	setOwnerSessionCookie,
@@ -31,11 +31,13 @@ export function restaurantSnapshotFromEntry(
 	entry: EmDashRestaurante | null | undefined,
 	fallbackName: string,
 ): OwnerRestaurantSnapshot {
+	const logoSrc = imageSrc(entry?.data.logo);
 	return {
 		nombre: entry?.data.nombre ?? fallbackName,
 		descripcion: entry?.data.descripcion ?? null,
 		menu_layout: entry?.data.menu_layout,
 		theme: entry?.data.theme,
+		logo: logoSrc ? { src: logoSrc, alt: entry?.data.logo?.alt } : null,
 	};
 }
 
@@ -139,12 +141,28 @@ export async function requireOwner(
 }
 
 /**
- * Revalidate Supabase auth + mapping + restaurant snapshot, refresh cookie (3d TTL).
- * Call after successful owner POSTs / BFF mutations.
+ * Refresh the session cookie after a restaurant mutation using the data we
+ * just wrote — zero extra requests (no Supabase / EmDash round trip).
+ * Only needed when the mutation touches snapshot fields
+ * (nombre / descripcion / menu_layout / theme); product and category
+ * mutations don't affect the cookie at all.
  */
-export async function revalidateOwnerSession(
-	request: Request,
+export async function refreshOwnerSnapshot(
 	cookies: AstroCookies,
-): Promise<RequireOwnerResult> {
-	return buildOwnerContextFromSupabase(request, cookies);
+	owner: OwnerContext,
+	patch: Partial<OwnerRestaurantSnapshot>,
+): Promise<void> {
+	const current: OwnerRestaurantSnapshot =
+		owner.restaurantSnapshot ?? { nombre: owner.restaurantName };
+	const snapshot: OwnerRestaurantSnapshot = { ...current, ...patch };
+	const restaurantName = snapshot.nombre || owner.restaurantName;
+
+	await setOwnerSessionCookie(cookies, {
+		userId: owner.userId,
+		email: owner.email,
+		restaurantId: owner.restaurant.emdash_restaurant_id,
+		restaurantSlug: owner.restaurant.emdash_restaurant_slug,
+		restaurantName,
+		restaurantSnapshot: snapshot,
+	});
 }

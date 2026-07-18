@@ -1,6 +1,6 @@
 ---
 import Dashboard from "../../layouts/Dashboard.astro";
-import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
+import { refreshOwnerSnapshot, requireOwner } from "../../lib/auth/require-owner";
 import { updateRestauranteViaApi, writesEnabled } from "../../lib/emdash/client";
 import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
 import { parseMenuLayout, type MenuColumns, type MenuNavigation } from "../../lib/menu-layout";
@@ -38,7 +38,7 @@ if (Astro.request.method === "POST") {
 			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, {
 				menu_layout: layout,
 			});
-			await revalidateOwnerSession(Astro.request, Astro.cookies);
+			await refreshOwnerSnapshot(Astro.cookies, owner, { menu_layout: layout });
 			return Astro.redirect(savedRedirect("/app/menu"));
 		} catch (err) {
 			error = err instanceof Error ? err.message : "No se pudo guardar";

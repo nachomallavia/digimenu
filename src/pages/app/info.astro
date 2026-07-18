@@ -1,7 +1,14 @@
 ---
 import Dashboard from "../../layouts/Dashboard.astro";
-import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
-import { updateRestauranteViaApi, writesEnabled } from "../../lib/emdash/client";
+import { refreshOwnerSnapshot, requireOwner } from "../../lib/auth/require-owner";
+import {
+	formImageFile,
+	imageSrc,
+	updateRestauranteViaApi,
+	uploadMediaViaApi,
+	writesEnabled,
+} from "../../lib/emdash/client";
+import type { OwnerSnapshotLogo } from "../../lib/auth/owner-session";
 import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
@@ -25,6 +32,8 @@ if (Astro.request.method === "POST") {
 	const form = await Astro.request.formData();
 	const nombre = String(form.get("nombre") ?? "").trim();
 	const descripcion = String(form.get("descripcion") ?? "").trim();
+	const removeLogo = form.get("remove_logo") === "1";
+	const logoFile = formImageFile(form, "logo");
 
 	if (!nombre) {
 		error = "El nombre es obligatorio.";
@@ -32,11 +41,26 @@ if (Astro.request.method === "POST") {
 		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
 	} else {
 		try {
-			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, {
+			const update: Record<string, unknown> = {
 				nombre,
 				descripcion: descripcion || null,
+			};
+			let logoPatch: OwnerSnapshotLogo | undefined;
+			if (removeLogo) {
+				update.logo = null;
+				logoPatch = null;
+			} else if (logoFile) {
+				const uploaded = await uploadMediaViaApi(logoFile, nombre);
+				update.logo = uploaded;
+				const uploadedSrc = imageSrc(uploaded);
+				if (uploadedSrc) logoPatch = { src: uploadedSrc, alt: uploaded.alt };
+			}
+			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, update);
+			await refreshOwnerSnapshot(Astro.cookies, owner, {
+				nombre,
+				descripcion: descripcion || null,
+				...(logoPatch !== undefined ? { logo: logoPatch } : {}),
 			});
-			await revalidateOwnerSession(Astro.request, Astro.cookies);
 			return Astro.redirect(savedRedirect("/app/info"));
 		} catch (err) {
 			error = err instanceof Error ? err.message : "No se pudo guardar";
@@ -44,8 +68,11 @@ if (Astro.request.method === "POST") {
 	}
 }
 
+// Session snapshot includes the logo; pre-logo cookies fall back to one
+// EmDash read + cookie upgrade (requireLogo).
 const restaurant = await loadOwnerRestaurant(owner, {
 	fromSession: true,
+	requireLogo: true,
 	cookies: Astro.cookies,
 });
 if (!restaurant.entry) {
@@ -54,6 +81,7 @@ if (!restaurant.entry) {
 
 const nombre = restaurant.entry?.data.nombre ?? owner.restaurantName;
 const descripcion = restaurant.entry?.data.descripcion ?? "";
+const logoSrc = imageSrc(restaurant.entry?.data.logo) ?? null;
 ---
 
 <Dashboard
@@ -65,7 +93,7 @@ const descripcion = restaurant.entry?.data.descripcion ?? "";
 	<div class="mx-auto flex max-w-2xl flex-col gap-6">
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">Info restaurante</h1>
-			<p class="text-muted-foreground">Nombre, descripción y datos visibles en el menú público.</p>
+			<p class="text-muted-foreground">Nombre, descripción, logo y datos visibles en el menú público.</p>
 		</div>
 
 		{
@@ -80,12 +108,10 @@ const descripcion = restaurant.entry?.data.descripcion ?? "";
 		<Card>
 			<CardHeader>
 				<CardTitle>Datos básicos</CardTitle>
-				<CardDescription>
-					El logo se gestiona por ahora desde EmDash admin / media (próxima iteración).
-				</CardDescription>
+				<CardDescription>Estos datos aparecen en el encabezado del menú público.</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<form method="POST" class="flex flex-col gap-4" enctype="application/x-www-form-urlencoded" data-astro-reload>
+				<form method="POST" class="flex flex-col gap-4" enctype="multipart/form-data" data-astro-reload>
 					<div class="flex flex-col gap-1.5">
 						<Label for="nombre">Nombre</Label>
 						<Input id="nombre" name="nombre" required value={nombre} disabled={!canWrite} />
@@ -98,6 +124,27 @@ const descripcion = restaurant.entry?.data.descripcion ?? "";
 							rows={4}
 							disabled={!canWrite}
 						>{descripcion}</Textarea>
+					</div>
+					<div class="flex flex-col gap-2">
+						<Label for="logo">Logo</Label>
+						{
+							logoSrc && (
+								<img
+									src={logoSrc}
+									alt={restaurant.entry?.data.logo?.alt ?? nombre}
+									class="h-20 w-auto max-w-48 rounded-md border border-border object-contain"
+								/>
+							)
+						}
+						<Input id="logo" name="logo" type="file" accept="image/*" disabled={!canWrite} />
+						{
+							logoSrc && (
+								<label class="flex items-center gap-2 text-sm">
+									<input type="checkbox" name="remove_logo" value="1" disabled={!canWrite} />
+									Quitar logo
+								</label>
+							)
+						}
 					</div>
 					<div>
 						<Button type="submit" variant="primary" disabled={!canWrite}>

@@ -4,12 +4,10 @@ import { clearOwnerSessionCookie } from "../../../lib/auth/owner-session";
 
 export const prerender = false;
 
-async function logout({ request, cookies, redirect }: Parameters<APIRoute>[0]) {
+// POST only: a GET logout is trivially CSRF-able (e.g. <img src="/app/auth/logout">).
+export const POST: APIRoute = async ({ request, cookies, redirect }) => {
 	clearOwnerSessionCookie(cookies);
 	const supabase = createSupabaseServerClient(request, cookies);
 	await supabase.auth.signOut();
 	return redirect("/app/login");
-}
-
-export const POST: APIRoute = logout;
-export const GET: APIRoute = logout;
+};

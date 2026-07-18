@@ -1,14 +1,17 @@
 ---
 import Dashboard from "../../../layouts/Dashboard.astro";
-import { requireOwner, revalidateOwnerSession } from "../../../lib/auth/require-owner";
+import { requireOwner } from "../../../lib/auth/require-owner";
 import {
+	assertCategoriaBelongsToRestaurant,
 	assertProductoBelongsToRestaurant,
 	deleteProductoViaApi,
+	formImageFile,
+	getCategoriaBySlug,
 	getProductoBySlug,
-	getProductoCategorias,
-	listCategorias,
-	setProductoCategoriasViaApi,
+	imageSrc,
+	listCategoriasForRestaurant,
 	updateProductoViaApi,
+	uploadMediaViaApi,
 	writesEnabled,
 } from "../../../lib/emdash/client";
 import { loadOwnerRestaurant, savedRedirect } from "../../../lib/emdash/owner-restaurant";
@@ -28,6 +31,7 @@ if (!auth.ok) {
 const { owner } = auth;
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
 const canWrite = writesEnabled();
+const restaurantId = owner.restaurant.emdash_restaurant_id;
 const slug = Astro.params.id;
 if (!slug) {
 	return Astro.redirect("/app/productos");
@@ -36,14 +40,11 @@ if (!slug) {
 let error: string | null = null;
 const saved = Astro.url.searchParams.get("saved") === "1";
 
-const { entry: producto } = await getProductoBySlug(slug);
+let { entry: producto } = await getProductoBySlug(slug);
 
-if (!producto || !assertProductoBelongsToRestaurant(producto, owner.restaurant.emdash_restaurant_id)) {
+if (!producto || !assertProductoBelongsToRestaurant(producto, restaurantId)) {
 	return Astro.redirect("/app/productos");
 }
-
-const categorias = await listCategorias();
-let selected = await getProductoCategorias(producto.data.id);
 
 if (Astro.request.method === "POST") {
 	const form = await Astro.request.formData();
@@ -55,38 +56,64 @@ if (Astro.request.method === "POST") {
 		try {
 			if (action === "delete") {
 				await deleteProductoViaApi(producto.data.id);
-				await revalidateOwnerSession(Astro.request, Astro.cookies);
 				return Astro.redirect("/app/productos?fresh=1");
 			}
 
 			const nombre = String(form.get("nombre") ?? "").trim();
 			const precio = Number(form.get("precio"));
 			const descripcion = String(form.get("descripcion") ?? "").trim();
-			const termIds = form.getAll("categoria").map(String);
+			const categoriaSlug = String(form.get("categoria") ?? "");
+			const removeImage = form.get("remove_imagen") === "1";
+			const imageFile = formImageFile(form, "imagen");
 
-			if (!nombre || Number.isNaN(precio)) {
+			if (!nombre || Number.isNaN(precio) || precio < 0) {
 				throw new Error("Nombre y precio válidos son obligatorios.");
 			}
 
-			await updateProductoViaApi(producto.data.id, {
+			// Ownership check: the selected categoria must belong to this restaurant.
+			let categoria: string | null = null;
+			if (categoriaSlug) {
+				const { entry: cat } = await getCategoriaBySlug(categoriaSlug);
+				if (!cat || !assertCategoriaBelongsToRestaurant(cat, restaurantId)) {
+					throw new Error("Categoría inválida.");
+				}
+				categoria = cat.data.id;
+			}
+
+			const update: {
+				nombre: string;
+				precio: number;
+				descripcion: string | null;
+				categoria: string | null;
+				imagen?: Awaited<ReturnType<typeof uploadMediaViaApi>> | null;
+			} = {
 				nombre,
 				precio,
 				descripcion: descripcion || null,
-			});
-			await setProductoCategoriasViaApi(producto.data.id, termIds);
-			await revalidateOwnerSession(Astro.request, Astro.cookies);
+				categoria,
+			};
+
+			if (removeImage) {
+				update.imagen = null;
+			} else if (imageFile) {
+				update.imagen = await uploadMediaViaApi(imageFile, nombre);
+			}
+
+			await updateProductoViaApi(producto.data.id, update);
 			return Astro.redirect(savedRedirect(`/app/productos/${slug}`));
 		} catch (err) {
 			error = err instanceof Error ? err.message : "No se pudo guardar";
+			// Re-read so the form reflects the DB after a failed POST.
+			const refreshed = await getProductoBySlug(slug);
+			if (refreshed.entry) producto = refreshed.entry;
 		}
 	}
 }
 
-// Re-read after failed POST so form reflects DB; on success we redirected.
-const refreshed = await getProductoBySlug(slug);
-const current = refreshed.entry ?? producto;
-selected = await getProductoCategorias(current.data.id);
-const selectedIds = new Set(selected.map((c) => c.id));
+const { entries: categorias } = await listCategoriasForRestaurant(restaurantId);
+const current = producto;
+const selectedCategoriaId = current.data.categoria ?? null;
+const imagenSrc = imageSrc(current.data.imagen) ?? null;
 ---
 
 <Dashboard
@@ -114,12 +141,10 @@ const selectedIds = new Set(selected.map((c) => c.id));
 		<Card>
 			<CardHeader>
 				<CardTitle>Editar</CardTitle>
-				<CardDescription>
-					La imagen se gestiona por ahora desde EmDash media (próxima iteración).
-				</CardDescription>
+				<CardDescription>Datos del producto, categoría e imagen.</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<form method="POST" class="flex flex-col gap-4" enctype="application/x-www-form-urlencoded" data-astro-reload>
+				<form method="POST" class="flex flex-col gap-4" enctype="multipart/form-data" data-astro-reload>
 					<input type="hidden" name="action" value="save" />
 					<div class="flex flex-col gap-1.5">
 						<Label for="nombre">Nombre</Label>
@@ -151,8 +176,41 @@ const selectedIds = new Set(selected.map((c) => c.id));
 						</Textarea>
 					</div>
 
-					<fieldset class="flex flex-col gap-2">
-						<Label>Categorías</Label>
+					<div class="flex flex-col gap-2">
+						<Label for="imagen">Imagen</Label>
+						{
+							imagenSrc && (
+								<img
+									src={imagenSrc}
+									alt={current.data.imagen?.alt ?? current.data.nombre}
+									class="h-32 w-32 rounded-md border border-border object-cover"
+								/>
+							)
+						}
+						<Input
+							id="imagen"
+							name="imagen"
+							type="file"
+							accept="image/*"
+							disabled={!canWrite}
+						/>
+						{
+							imagenSrc && (
+								<label class="flex items-center gap-2 text-sm">
+									<input
+										type="checkbox"
+										name="remove_imagen"
+										value="1"
+										disabled={!canWrite}
+									/>
+									Quitar imagen
+								</label>
+							)
+						}
+					</div>
+
+					<div class="flex flex-col gap-1.5">
+						<Label for="categoria">Categoría</Label>
 						{
 							categorias.length === 0 ? (
 								<p class="text-sm text-muted-foreground">
@@ -163,23 +221,22 @@ const selectedIds = new Set(selected.map((c) => c.id));
 									.
 								</p>
 							) : (
-								<div class="flex flex-col gap-2">
+								<select
+									id="categoria"
+									name="categoria"
+									disabled={!canWrite}
+									class="border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									<option value="">Sin categoría</option>
 									{categorias.map((cat) => (
-										<label class="flex items-center gap-2 text-sm">
-											<input
-												type="checkbox"
-												name="categoria"
-												value={cat.id}
-												checked={selectedIds.has(cat.id)}
-												disabled={!canWrite}
-											/>
-											{cat.label}
-										</label>
+										<option value={cat.id} selected={selectedCategoriaId === cat.data.id}>
+											{cat.data.nombre}
+										</option>
 									))}
-								</div>
+								</select>
 							)
 						}
-					</fieldset>
+					</div>
 
 					<div class="flex flex-wrap gap-2">
 						<Button type="submit" variant="primary" disabled={!canWrite}>

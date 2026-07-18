@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
-import { requireOwner, revalidateOwnerSession } from "../../../lib/auth/require-owner";
+import { refreshOwnerSnapshot, requireOwner } from "../../../lib/auth/require-owner";
+import type { OwnerRestaurantSnapshot } from "../../../lib/auth/owner-session";
 import {
 	getRestauranteById,
 	restauranteMenuLayout,
@@ -84,7 +85,14 @@ export const PATCH: APIRoute = async ({ request, cookies }) => {
 			auth.owner.restaurant.emdash_restaurant_id,
 			data,
 		);
-		await revalidateOwnerSession(request, cookies);
+		const patch: Partial<OwnerRestaurantSnapshot> = {};
+		if (typeof data.nombre === "string") patch.nombre = data.nombre;
+		if ("descripcion" in data) {
+			patch.descripcion = typeof data.descripcion === "string" ? data.descripcion : null;
+		}
+		if ("menu_layout" in data) patch.menu_layout = data.menu_layout;
+		if ("theme" in data) patch.theme = data.theme;
+		await refreshOwnerSnapshot(cookies, auth.owner, patch);
 		return new Response(JSON.stringify(updated), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },

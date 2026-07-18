@@ -1,6 +1,6 @@
 ---
 import Dashboard from "../../layouts/Dashboard.astro";
-import { requireOwner, revalidateOwnerSession } from "../../lib/auth/require-owner";
+import { refreshOwnerSnapshot, requireOwner } from "../../lib/auth/require-owner";
 import { updateRestauranteViaApi, writesEnabled } from "../../lib/emdash/client";
 import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
 import {
@@ -35,13 +35,20 @@ if (Astro.request.method === "POST") {
 		["none", "sm", "md", "lg"].includes(radiusRaw) ? radiusRaw : "md"
 	) as ThemeRadius;
 
+	// Server-side hex validation: these values end up inside style attributes
+	// on the public menu, so reject anything that isn't a #rrggbb color.
+	const hexColor = (name: string, fallback: string): string => {
+		const value = String(form.get(name) ?? "").trim();
+		return /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+	};
+
 	const themePayload = {
 		mode,
-		primary: String(form.get("primary") ?? DEFAULT_RESTAURANT_THEME.primary),
-		background: String(form.get("background") ?? DEFAULT_RESTAURANT_THEME.background),
-		foreground: String(form.get("foreground") ?? DEFAULT_RESTAURANT_THEME.foreground),
-		muted: String(form.get("muted") ?? DEFAULT_RESTAURANT_THEME.muted),
-		border: String(form.get("border") ?? DEFAULT_RESTAURANT_THEME.border),
+		primary: hexColor("primary", DEFAULT_RESTAURANT_THEME.primary),
+		background: hexColor("background", DEFAULT_RESTAURANT_THEME.background),
+		foreground: hexColor("foreground", DEFAULT_RESTAURANT_THEME.foreground),
+		muted: hexColor("muted", DEFAULT_RESTAURANT_THEME.muted),
+		border: hexColor("border", DEFAULT_RESTAURANT_THEME.border),
 		radius,
 		fontDisplay: String(form.get("fontDisplay") ?? "system-sans"),
 		fontBody: String(form.get("fontBody") ?? "system-sans"),
@@ -54,7 +61,7 @@ if (Astro.request.method === "POST") {
 			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, {
 				theme: themePayload,
 			});
-			await revalidateOwnerSession(Astro.request, Astro.cookies);
+			await refreshOwnerSnapshot(Astro.cookies, owner, { theme: themePayload });
 			return Astro.redirect(savedRedirect("/app/estilos"));
 		} catch (err) {
 			error = err instanceof Error ? err.message : "No se pudo guardar";

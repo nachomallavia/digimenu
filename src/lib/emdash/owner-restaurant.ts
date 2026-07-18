@@ -29,6 +29,7 @@ function entryFromSnapshot(
 			descripcion: snapshot.descripcion ?? undefined,
 			menu_layout: snapshot.menu_layout,
 			theme: snapshot.theme,
+			logo: snapshot.logo ? { src: snapshot.logo.src, alt: snapshot.logo.alt } : undefined,
 		},
 	};
 }
@@ -39,6 +40,8 @@ function entryFromSnapshot(
  * - `chromeOnly`: use session cookie fields (no EmDash) — for sidebar/header on light pages.
  * - `fromSession`: synthesize entry from cookie snapshot (info/menu/estilos GETs).
  *   If snapshot missing, one EmDash read + cookie upgrade (when `cookies` passed).
+ * - `requireLogo` (with `fromSession`): snapshots from pre-logo cookies don't know
+ *   the logo — fall back to the EmDash read + cookie upgrade in that case.
  * - default: in-process EmDash entry.
  * - `preferApi`: HTTP API path (rare).
  */
@@ -48,6 +51,7 @@ export async function loadOwnerRestaurant(
 		preferApi?: boolean;
 		chromeOnly?: boolean;
 		fromSession?: boolean;
+		requireLogo?: boolean;
 		cookies?: AstroCookies;
 	} = {},
 ): Promise<OwnerRestaurantView> {
@@ -60,8 +64,10 @@ export async function loadOwnerRestaurant(
 	}
 
 	if (opts.fromSession) {
-		if (owner.restaurantSnapshot) {
-			const entry = entryFromSnapshot(owner, owner.restaurantSnapshot);
+		const cached = owner.restaurantSnapshot;
+		const cachedUsable = cached && (!opts.requireLogo || cached.logo !== undefined);
+		if (cachedUsable) {
+			const entry = entryFromSnapshot(owner, cached);
 			return {
 				slug,
 				name: entry.data.nombre || name,
