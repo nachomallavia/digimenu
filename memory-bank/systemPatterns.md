@@ -8,7 +8,7 @@
 - **Admin:** `/_emdash/admin` (ops only)
 - **Owner app:** `/app` DigiMenu + Supabase auth; Starwind sidebar; View Transitions disabled (`ClientRouter` off in `Dashboard.astro`)
 - **Owner session:** Signed httpOnly cookie `digimenu_owner` (Path=`/app`, 3d). `requireOwner` prefers cookie; `chromeOnly` skips EmDash for sidebar chrome. Snapshot incluye `logo` (`{src,alt}|null`; `undefined` = cookie vieja → 1 lectura EmDash + upgrade con `requireLogo`). Post-mutación: producto/categoría no tocan cookie; restaurante re-firma con `refreshOwnerSnapshot` (snapshot desde payload, cero requests extra).
-- **Owner list GETs:** SSR live collections (`listProductosForRestaurant` / `listCategoriasForRestaurant` + `Astro.cache.set`) — one document request owns the reads. info/menu/estilos keep `fromSession`.
+- **Owner list GETs:** SSR live collections (`listProductosForRestaurant` / `listCategoriasForRestaurant` + `Astro.cache.set`) — one document request owns the reads. Worker read-through cache (`owner-list-cache.ts`, Cache API, 5min TTL, bust both on product/categoria write). info/menu/estilos keep `fromSession`.
 - **Layouts:** Root → Menu (public/`/m`) or Dashboard (`/app`) or AppGuest (login/pending)
 - **Plugins:** `digimenu-autofill` (trusted) auto-assigns restaurant on product create when only one published restaurant exists
 - **Categorías:** colección `categorias` (nombre, restaurante ref req, icon, cover, orden) — no taxonomía. `productos.categoria` ref opcional; agrupado del menú en memoria (3 queries totales). Page handlers validate ownership.

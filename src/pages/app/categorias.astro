@@ -86,17 +86,21 @@ if (Astro.request.method === "POST") {
 					cover = await uploadMediaViaApi(coverFile, label);
 				}
 
-				await updateCategoriaViaApi(entry.data.id, {
-					nombre: label,
-					icon,
-					...(cover !== undefined ? { cover } : {}),
-				});
+				await updateCategoriaViaApi(
+					entry.data.id,
+					{
+						nombre: label,
+						icon,
+						...(cover !== undefined ? { cover } : {}),
+					},
+					restaurantId,
+				);
 				return Astro.redirect(savedRedirect("/app/categorias", { action: "save" }));
 			} else if (action === "delete") {
 				const slug = String(form.get("slug") ?? "");
 				if (!slug) throw new Error("Slug requerido.");
 				const entry = await ownedCategoria(slug);
-				await deleteCategoriaViaApi(entry.data.id);
+				await deleteCategoriaViaApi(entry.data.id, restaurantId);
 				return Astro.redirect(savedRedirect("/app/categorias", { action: "delete" }));
 			}
 		} catch (err) {
@@ -107,7 +111,7 @@ if (Astro.request.method === "POST") {
 
 const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
 const { entries: categorias, cacheHint } = await listCategoriasForRestaurant(restaurantId);
-if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
+if (cacheHint && Astro.cache?.enabled) Astro.cache.set(cacheHint);
 
 const message = saved
 	? savedAction === "delete"

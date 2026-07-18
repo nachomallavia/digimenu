@@ -79,7 +79,7 @@ Product/category mutations never touch the session cookie. Restaurant-level muta
 
 ## Page load strategy
 
-**Rule:** each owner GET owns its reads in frontmatter via live collections. The browser makes **one** document request for that page’s data. Sidebar chrome stays `chromeOnly` (cookie name/slug, no EmDash). Always `Astro.cache.set(cacheHint)` when querying.
+**Rule:** each owner GET owns its reads in frontmatter via live collections. The browser makes **one** document request for that page’s data. Sidebar chrome stays `chromeOnly` (cookie name/slug, no EmDash). Call `Astro.cache.set(cacheHint)` when EmDash returns a hint (skipped on Worker list-cache hits).
 
 | Route | Data loading |
 |-------|----------------|
@@ -89,31 +89,18 @@ Product/category mutations never touch the session cookie. Restaurant-level muta
 | `/app/productos/[id]` | `getProductoBySlug` + `listCategoriasForRestaurant` (select) |
 | `/app/info`, `/menu`, `/estilos` | `fromSession` restaurant snapshot (`logo` included; old cookies fall back to one EmDash read + upgrade via `requireLogo`) |
 
-### Before vs after (SWR frankenstein → live collections)
+### Owner list cache (Workers)
 
-Former approach: chromeOnly HTML shell + client `GET /app/api/*` + sessionStorage SWR (`owner-browser-cache.ts`). Same EmDash list work, second HTTP hop, loading flash.
+`listProductosForRestaurant` / `listCategoriasForRestaurant` use a **Worker-side read-through cache** ([`src/lib/emdash/owner-list-cache.ts`](../src/lib/emdash/owner-list-cache.ts)):
 
-| Metric | Before (SWR) | After (SSR collections) |
-|--------|--------------|-------------------------|
-| Cold `/app` HTTP | 3 (HTML + 2 APIs) | **1** |
-| Cold `/app/productos` HTTP | 2 (HTML + API) | **1** |
-| Cold `/app/categorias` HTTP | 2 (HTML + API) | **1** |
-| List in first HTML | No (“Cargando…”) | Yes |
-| Extra modules | `owner-browser-cache.ts` + `/app/api/*` | None |
-| Soft-nav TTFB | Often lower (empty shell) | Includes EmDash list in document |
-| Time-to-usable-list | TTFB_html + TTFB_api (+ paint) | Document TTFB only |
+- Keyed by `restaurantId` (tenant-safe). Storage: Cache API (`digimenu-owner-lists`); in-memory Map when Cache API is unavailable (local).
+- TTL **5 minutes** safety net; **bust both** lists after any product/category create/update/delete.
+- Browser still gets one SSR HTML page — no client SWR, no public CDN `Cache-Control` on `/app` (unsafe for authenticated HTML).
 
-**Local measurements** (2026-07-18, `npx emdash dev`, Finca: 86 productos / 15 categorías):
+First nav after deploy/save/TTL may still hit EmDash; repeat navs within TTL should be much faster on Workers.
 
-| Route (after, authenticated, 1 HTTP) | Total time | Notes |
-|--------------------------------------|------------|--------|
-| `/app` | ≈ **149ms** | Counts in HTML; no “Cargando…” |
-| `/app/productos` | ≈ **82ms** | 86 product links in first HTML |
-| `/app/categorias` | ≈ **85ms** | 15 edit forms in first HTML |
-| `/m/finca` (proxy, warm) | TTFB ≈ **82–86ms** | Same in-process list helpers |
+### History note
 
-Before: same EmDash work plus a second `/app/api/*` hop after an empty shell. Deleted `/app/api/productos|categorias|restaurante` now return **404**.
-
-If Worker EmDash list latency makes soft nav feel worse, fix query/cache performance — do **not** reintroduce a second HTTP list layer.
+Earlier approach used chromeOnly HTML + client `GET /app/api/*` + sessionStorage SWR (2–3 HTTP). Replaced by SSR collections (1 HTTP) + Worker list cache above.
 
 Seed defines schema for empty DBs. Existing DBs can be migrated with `scripts/migrate-categorias.mjs` (local) or via Worker MCP.

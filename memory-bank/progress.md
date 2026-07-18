@@ -5,7 +5,7 @@
 - Supabase digimenu-db: table `owner_restaurants` + RLS
 - Owner app: auth + dashboard shell (Starwind sidebar; View Transitions disabled)
 - Owner sections: info, menu type, estilos, categorías, productos (+ detalle)
-- Owner lists: SSR live collections (no client SWR / no `/app/api/*` JSON BFF); local `/app/productos` ≈ 82ms with 86 rows in first HTML
+- Owner lists: SSR live collections + Worker list cache (`owner-list-cache.ts`); no client SWR / no `/app/api/*` JSON BFF
 - DigiMenu owner session cookie (`digimenu_owner`, 3d TTL, HMAC) — sin revalidación post-mutación (`refreshOwnerSnapshot` desde payload)
 - Docs: `docs/owner-auth.md`, `docs/owner-dashboard.md`, `.env.example`
 - **Categorías como colección `categorias`** (nombre, restaurante ref, icon, cover, orden) + `productos.categoria` — local y Worker migrados (2026-07-17), taxonomía y `category_meta` eliminados

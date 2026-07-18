@@ -30,8 +30,8 @@ const [
 	listCategoriasForRestaurant(restaurantId),
 ]);
 if (Astro.cache?.enabled) {
-	Astro.cache.set(productosHint);
-	Astro.cache.set(categoriasHint);
+	if (productosHint) Astro.cache.set(productosHint);
+	if (categoriasHint) Astro.cache.set(categoriasHint);
 }
 ---
 
@@ -89,3 +89,29 @@ if (Astro.cache?.enabled) {
 		}
 	</div>
 </Dashboard>
+
+<script>
+	import { prefetch } from "astro:prefetch";
+
+	// Warm panel routes after resumen settles so the first sidebar click
+	// is often served from the browser prefetch cache + Worker list cache.
+	function prefetchPanelRoutes() {
+		const routes = [
+			"/app/productos",
+			"/app/categorias",
+			"/app/info",
+			"/app/menu",
+			"/app/estilos",
+		];
+		const run = () => {
+			for (const href of routes) prefetch(href);
+		};
+		if ("requestIdleCallback" in window) {
+			requestIdleCallback(run, { timeout: 2000 });
+		} else {
+			setTimeout(run, 300);
+		}
+	}
+
+	prefetchPanelRoutes();
+</script>

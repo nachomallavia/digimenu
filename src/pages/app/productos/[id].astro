@@ -55,7 +55,7 @@ if (Astro.request.method === "POST") {
 	} else {
 		try {
 			if (action === "delete") {
-				await deleteProductoViaApi(producto.data.id);
+				await deleteProductoViaApi(producto.data.id, restaurantId);
 				return Astro.redirect("/app/productos?fresh=1");
 			}
 
@@ -99,7 +99,7 @@ if (Astro.request.method === "POST") {
 				update.imagen = await uploadMediaViaApi(imageFile, nombre);
 			}
 
-			await updateProductoViaApi(producto.data.id, update);
+			await updateProductoViaApi(producto.data.id, update, restaurantId);
 			return Astro.redirect(savedRedirect(`/app/productos/${slug}`));
 		} catch (err) {
 			error = err instanceof Error ? err.message : "No se pudo guardar";

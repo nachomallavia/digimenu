@@ -19,7 +19,7 @@ Categorías como colección + reducción de round trips: COMPLETADO (local + pro
 - Owner media: multipart `POST /_emdash/api/media` via PAT BFF, then attach to `imagen` / `logo` / `categorias.cover`
 
 ## Recent
-- Owner lists: SSR live collections (`listProductos`/`listCategorias` + `Astro.cache.set`); eliminados SWR, `owner-browser-cache.ts`, y `/app/api/*` JSON BFF — 1 HTTP por ruta (antes 2–3)
+- Owner lists: SSR live collections + Worker read-through cache (`owner-list-cache.ts`, bust on write); eliminados client SWR / `/app/api/*` JSON BFF
 - Migración categorías → colección: seed, `scripts/migrate-categorias.mjs` (local), MCP (Worker: colección + campos + 15 entradas + 86 productos + cleanup taxonomía/category_meta)
 - Eliminados: taxonomía `categoria`, `restaurantes.category_meta`, `src/lib/category-meta.ts` (iconos ahora en `src/lib/category-icons.ts`)
 - `/m/[slug]`: ~89 queries → 3 (~2.9s → ~1.0s local)

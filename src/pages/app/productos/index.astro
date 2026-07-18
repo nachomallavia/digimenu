@@ -1,12 +1,12 @@
 ---
-import Dashboard from "../../../layouts/Dashboard.astro";
-import { requireOwner } from "../../../lib/auth/require-owner";
+import Dashboard from "@/layouts/Dashboard.astro";
+import { requireOwner } from "@/lib/auth/require-owner";
 import {
 	createProductoViaApi,
 	listProductosForRestaurant,
 	writesEnabled,
-} from "../../../lib/emdash/client";
-import { loadOwnerRestaurant } from "../../../lib/emdash/owner-restaurant";
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant } from "@/lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
 import { Label } from "@/components/starwind/label";
@@ -53,7 +53,7 @@ if (Astro.request.method === "POST") {
 
 const restaurantId = owner.restaurant.emdash_restaurant_id;
 const { entries: productos, cacheHint } = await listProductosForRestaurant(restaurantId);
-if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
+if (cacheHint && Astro.cache?.enabled) Astro.cache.set(cacheHint);
 
 const priceFmt = new Intl.NumberFormat("es-AR", {
 	style: "currency",

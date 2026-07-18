@@ -1,5 +1,10 @@
 import { getEmDashCollection, getEmDashEntry } from "emdash";
 import { emdashJson, getEmDashApiConfig, writesEnabled } from "./api";
+import {
+	bustOwnerListCache,
+	getCachedList,
+	setCachedList,
+} from "./owner-list-cache";
 import { parseMenuLayout, type MenuLayout } from "../menu-layout";
 import { parseRestaurantTheme, type RestaurantTheme } from "../restaurant-theme";
 
@@ -153,9 +158,14 @@ export async function uploadMediaViaApi(file: File, alt?: string) {
 
 /**
  * List productos for a restaurant via in-process EmDash (same Astro app).
- * No PAT required for reads.
+ * No PAT required for reads. Worker-side read-through cache (see owner-list-cache).
  */
 export async function listProductosForRestaurant(restaurantId: string) {
+	const cached = await getCachedList("productos", restaurantId);
+	if (cached) {
+		return { entries: cached as EmDashProducto[], cacheHint: undefined };
+	}
+
 	const { entries, cacheHint, error } = await getEmDashCollection("productos", {
 		where: { restaurante: restaurantId },
 		limit: 200,
@@ -165,7 +175,26 @@ export async function listProductosForRestaurant(restaurantId: string) {
 		throw new Error(error.message ?? "Failed to list productos");
 	}
 
-	return { entries: entries as EmDashProducto[], cacheHint };
+	const typed = entries as EmDashProducto[];
+	await setCachedList(
+		"productos",
+		restaurantId,
+		typed.map((e) => ({
+			id: e.id,
+			slug: e.slug,
+			status: e.status,
+			data: {
+				id: e.data.id,
+				nombre: e.data.nombre,
+				descripcion: e.data.descripcion,
+				precio: e.data.precio,
+				imagen: e.data.imagen ?? null,
+				restaurante: e.data.restaurante,
+				categoria: e.data.categoria ?? null,
+			},
+		})),
+	);
+	return { entries: typed, cacheHint };
 }
 
 export async function getProductoBySlug(slug: string) {
@@ -207,15 +236,41 @@ function sortCategorias(entries: EmDashCategoria[]): EmDashCategoria[] {
 
 /**
  * List categorías of one restaurant, ordered by `orden`.
- * In-process read — no PAT required.
+ * In-process read — no PAT required. Worker-side read-through cache.
  */
 export async function listCategoriasForRestaurant(restaurantId: string) {
+	const cached = await getCachedList("categorias", restaurantId);
+	if (cached) {
+		return {
+			entries: sortCategorias(cached as EmDashCategoria[]),
+			cacheHint: undefined,
+		};
+	}
+
 	const { entries, cacheHint, error } = await getEmDashCollection("categorias", {
 		where: { restaurante: restaurantId },
 		limit: 100,
 	});
 	if (error) throw new Error(error.message ?? "Failed to list categorias");
-	return { entries: sortCategorias(entries as EmDashCategoria[]), cacheHint };
+	const typed = sortCategorias(entries as EmDashCategoria[]);
+	await setCachedList(
+		"categorias",
+		restaurantId,
+		typed.map((e) => ({
+			id: e.id,
+			slug: e.slug,
+			status: e.status,
+			data: {
+				id: e.data.id,
+				nombre: e.data.nombre,
+				restaurante: e.data.restaurante,
+				icon: e.data.icon ?? null,
+				cover: e.data.cover ?? null,
+				orden: e.data.orden ?? null,
+			},
+		})),
+	);
+	return { entries: typed, cacheHint };
 }
 
 export async function getCategoriaBySlug(idOrSlug: string) {
@@ -264,6 +319,7 @@ export async function createCategoriaViaApi(input: {
 	if (created.item?.id) {
 		await publishContent("categorias", created.item.id);
 	}
+	await bustOwnerListCache(input.restauranteId, "both");
 	return created;
 }
 
@@ -275,6 +331,7 @@ export async function updateCategoriaViaApi(
 		cover?: EmDashImage | null;
 		orden?: number;
 	},
+	restaurantId: string,
 ) {
 	requireWrites();
 	const updated = await emdashJson<ContentApiResponse>(
@@ -285,14 +342,18 @@ export async function updateCategoriaViaApi(
 		},
 	);
 	await publishContent("categorias", id);
+	await bustOwnerListCache(restaurantId, "both");
 	return updated;
 }
 
-export async function deleteCategoriaViaApi(id: string) {
+export async function deleteCategoriaViaApi(id: string, restaurantId: string) {
 	requireWrites();
-	return emdashJson(`/_emdash/api/content/categorias/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-	});
+	const result = await emdashJson(
+		`/_emdash/api/content/categorias/${encodeURIComponent(id)}`,
+		{ method: "DELETE" },
+	);
+	await bustOwnerListCache(restaurantId, "both");
+	return result;
 }
 
 // ---------- Productos (writes) ----------
@@ -333,6 +394,7 @@ export async function createProductoViaApi(input: {
 	if (created.item?.id) {
 		await publishContent("productos", created.item.id);
 	}
+	await bustOwnerListCache(input.restauranteId, "both");
 	return created;
 }
 
@@ -345,6 +407,7 @@ export async function updateProductoViaApi(
 		imagen?: EmDashImage | null;
 		categoria?: string | null;
 	},
+	restaurantId: string,
 ) {
 	requireWrites();
 	const updated = await emdashJson<ContentApiResponse>(
@@ -355,14 +418,18 @@ export async function updateProductoViaApi(
 		},
 	);
 	await publishContent("productos", id);
+	await bustOwnerListCache(restaurantId, "both");
 	return updated;
 }
 
-export async function deleteProductoViaApi(id: string) {
+export async function deleteProductoViaApi(id: string, restaurantId: string) {
 	requireWrites();
-	return emdashJson(`/_emdash/api/content/productos/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-	});
+	const result = await emdashJson(
+		`/_emdash/api/content/productos/${encodeURIComponent(id)}`,
+		{ method: "DELETE" },
+	);
+	await bustOwnerListCache(restaurantId, "both");
+	return result;
 }
 
 export async function updateRestauranteViaApi(
