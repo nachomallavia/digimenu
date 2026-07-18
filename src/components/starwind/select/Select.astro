@@ -521,15 +521,33 @@ const { class: className, name, defaultValue, required, ...rest } = Astro.props;
 
     private setSize() {
       if (!this.trigger || !this.content) return;
-      this.content.style.setProperty(
-        "--starwind-select-content-width",
-        `${this.content.offsetWidth}px`,
-      );
 
-      this.content.style.setProperty(
-        "--starwind-select-trigger-width",
-        `${this.trigger.offsetWidth}px`,
-      );
+      const prevDisplay = this.content.style.display;
+      const prevVisibility = this.content.style.visibility;
+      const prevWidth = this.content.style.width;
+      const prevMinWidth = this.content.style.minWidth;
+      const wasHidden = getComputedStyle(this.content).display === "none";
+
+      // Measure natural dropdown width (longest option) without flashing open.
+      if (wasHidden) {
+        this.content.style.visibility = "hidden";
+        this.content.style.display = "block";
+      }
+      this.content.style.width = "max-content";
+      this.content.style.minWidth = "0";
+
+      const longestOptionWidth = this.content.offsetWidth;
+
+      this.content.style.display = prevDisplay;
+      this.content.style.visibility = prevVisibility;
+      this.content.style.minWidth = prevMinWidth;
+      this.content.style.width = prevWidth;
+
+      const width = Math.max(this.trigger.offsetWidth, longestOptionWidth);
+      this.trigger.style.minWidth = `${width}px`;
+      this.content.style.setProperty("--starwind-select-trigger-width", `${width}px`);
+      this.content.style.setProperty("--starwind-select-content-width", `${width}px`);
+      this.content.style.width = "var(--starwind-select-trigger-width)";
     }
 
     private toggleSelect() {
@@ -672,6 +690,8 @@ const { class: className, name, defaultValue, required, ...rest } = Astro.props;
           this.selectedItem = item;
         }
       }
+      // Re-measure after default selection — trigger may grow past placeholder width.
+      this.setSize();
     }
 
     /**

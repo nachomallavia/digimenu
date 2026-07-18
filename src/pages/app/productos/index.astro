@@ -17,6 +17,12 @@ import {
 } from "@/lib/emdash/client";
 import { loadOwnerRestaurant } from "@/lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
+import {
+	Dropdown,
+	DropdownCheckboxItem,
+	DropdownContent,
+	DropdownTrigger,
+} from "@/components/starwind/dropdown";
 import { Input } from "@/components/starwind/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/starwind/select";
 
@@ -232,30 +238,68 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				autocomplete="off"
 			/>
 			<div class="flex gap-2">
-				<Select>
-					<SelectTrigger>
-						<SelectValue placeholder="Filtrar por categoría" />
-					</SelectTrigger>
-					<SelectContent>
+				<Dropdown data-categoria-filter>
+					<DropdownTrigger asChild>
+						<Button variant="outline" data-categoria-filter-trigger>
+							<span data-categoria-filter-label>Filtrar categorías</span>
+						</Button>
+					</DropdownTrigger>
+					<DropdownContent align="end" class="max-h-72 overflow-y-auto">
+						<div class="bg-popover sticky top-0 z-10 -mx-1 -mt-1 mb-1 border-b border-border p-2">
+							<Input
+								type="search"
+								size="sm"
+								placeholder="Buscar categoría"
+								class="w-full"
+								data-categoria-filter-search
+								autocomplete="off"
+							/>
+							<button
+								type="button"
+								data-categoria-filter-clear
+								hidden
+								class="text-muted-foreground hover:bg-accent hover:text-accent-foreground mt-1.5 w-full rounded-sm px-2 py-1.5 text-left text-sm"
+							>
+								Limpiar filtro
+							</button>
+						</div>
+						<DropdownCheckboxItem
+							data-productos-cat-filter
+							data-categoria-id=""
+							closeOnClick={false}
+						>
+							Sin categoría
+						</DropdownCheckboxItem>
 						{categorias.map((c) => (
-							<SelectItem value={c.data.id}>{c.data.nombre}</SelectItem>
+							<DropdownCheckboxItem
+								data-productos-cat-filter
+								data-categoria-id={c.data.id}
+								closeOnClick={false}
+							>
+								{c.data.nombre}
+							</DropdownCheckboxItem>
 						))}
-						<SelectItem value="all">Todas las categorías</SelectItem>
-					</SelectContent>
-				</Select>
-				<Select>
+						<p
+							data-categoria-filter-empty
+							hidden
+							class="text-muted-foreground py-4 text-center text-sm"
+						>
+							Ninguna categoría coincide.
+						</p>
+					</DropdownContent>
+				</Dropdown>
+				<Select defaultValue="20" data-page-size>
 					<SelectTrigger>
-						<SelectValue placeholder="Ordenar por" />
+						<SelectValue placeholder="Mostrar" />
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value="nombre">Nombre</SelectItem>
-						<SelectItem value="precio">Precio</SelectItem>
-						<SelectItem value="created_at">Fecha de creación</SelectItem>
-						<SelectItem value="updated_at">Fecha de actualización</SelectItem>
+						<SelectItem value="10">Mostrar 10 productos</SelectItem>
+						<SelectItem value="20">Mostrar 20 productos</SelectItem>
+						<SelectItem value="50">Mostrar 50 productos</SelectItem>
+						<SelectItem value="100">Mostrar 100 productos</SelectItem>
+						<SelectItem value="all">Mostrar todos los productos</SelectItem>
 					</SelectContent>
 				</Select>
-				<Button variant="outline">Asc</Button>
-				<Button variant="outline">Desc</Button>
 			</div>
 		</div>
 
@@ -365,12 +409,32 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 						})
 					)}
 					<tr data-productos-search-empty hidden>
-						<td colspan="4" class="text-muted-foreground p-6 text-center">
+						<td
+							colspan="4"
+							class="text-muted-foreground p-6 text-center"
+							data-productos-search-empty-message
+						>
 							Ningún producto coincide con la búsqueda.
 						</td>
 					</tr>
 				</tbody>
 			</table>
+		</div>
+
+		<div
+			data-productos-pager
+			hidden
+			class="flex flex-wrap items-center justify-between gap-3"
+		>
+			<p class="text-muted-foreground text-sm" data-pager-label>Mostrando 0–0 de 0</p>
+			<div class="flex gap-2">
+				<Button type="button" variant="outline" size="sm" data-page-prev disabled>
+					Anterior
+				</Button>
+				<Button type="button" variant="outline" size="sm" data-page-next disabled>
+					Siguiente
+				</Button>
+			</div>
 		</div>
 
 		<div
@@ -407,22 +471,34 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 <script>
 	import { postBatchUpdate, postDelete } from "@/lib/owner-edits/batch-client";
 	import {
+		currentPage,
 		discardProductoEdits,
 		dropProductoPending,
 		fieldErrors,
 		markProductosSaved,
+		pageSize,
 		pending,
 		productosHasFieldErrors,
 		productosPendingCount,
 		saving,
 		searchQuery,
+		selectedCategorias,
 		setProductoField,
 		setProductoFieldError,
 		showToast,
+		type PageSize,
 		type ProductoField,
 		type ProductoPatch,
 	} from "@/lib/owner-edits/productos-edits";
 	import { bindToastHost } from "@/lib/owner-edits/toast-ui";
+	import type { SelectChangeEvent } from "@/components/starwind/select";
+
+	function parsePageSize(raw: string): PageSize | null {
+		if (raw === "all") return "all";
+		const n = Number(raw);
+		if (n === 10 || n === 20 || n === 50 || n === 100) return n;
+		return null;
+	}
 
 	function initProductosEditor() {
 		const rootEl = document.querySelector<HTMLElement>("[data-productos-editor]");
@@ -439,11 +515,40 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 		const toastHost = root.querySelector<HTMLElement>("[data-owner-toast]");
 		const searchInput = root.querySelector<HTMLInputElement>("[data-productos-search]");
 		const searchEmpty = root.querySelector<HTMLElement>("[data-productos-search-empty]");
+		const searchEmptyMessage = root.querySelector<HTMLElement>(
+			"[data-productos-search-empty-message]",
+		);
+		const pageSizeSelect = root.querySelector<HTMLElement>("[data-page-size]");
+		const categoriaFilter = root.querySelector<HTMLElement>("[data-categoria-filter]");
+		const categoriaFilterTrigger = root.querySelector<HTMLElement>(
+			"[data-categoria-filter-trigger]",
+		);
+		const categoriaFilterLabel = root.querySelector<HTMLElement>("[data-categoria-filter-label]");
+		const categoriaFilterContent = categoriaFilter?.querySelector<HTMLElement>(
+			'[data-slot="dropdown-content"]',
+		);
+		const categoriaFilterSearch = categoriaFilterContent?.querySelector<HTMLInputElement>(
+			"[data-categoria-filter-search]",
+		);
+		const categoriaFilterClear = categoriaFilterContent?.querySelector<HTMLButtonElement>(
+			"[data-categoria-filter-clear]",
+		);
+		const categoriaFilterEmpty = categoriaFilterContent?.querySelector<HTMLElement>(
+			"[data-categoria-filter-empty]",
+		);
+		const pager = root.querySelector<HTMLElement>("[data-productos-pager]");
+		const pagerLabel = root.querySelector<HTMLElement>("[data-pager-label]");
+		const pagePrevBtn = root.querySelector<HTMLButtonElement>("[data-page-prev]");
+		const pageNextBtn = root.querySelector<HTMLButtonElement>("[data-page-next]");
 
 		if (toastHost) bindToastHost(toastHost);
 
 		searchQuery.set("");
+		pageSize.set(20);
+		currentPage.set(1);
+		selectedCategorias.set([]);
 		if (searchInput) searchInput.value = "";
+		if (categoriaFilterSearch) categoriaFilterSearch.value = "";
 
 		function foldSearchText(value: string): string {
 			return value
@@ -453,27 +558,222 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				.replace(/[\u0300-\u036f]/g, "");
 		}
 
-		function applySearchFilter() {
-			const query = foldSearchText(searchQuery.get());
-			const rows = root.querySelectorAll<HTMLElement>("[data-producto-row]");
+		function sizeCategoriaFilter() {
+			if (!categoriaFilterTrigger || !categoriaFilterContent) return;
+
+			const prevDisplay = categoriaFilterContent.style.display;
+			const prevVisibility = categoriaFilterContent.style.visibility;
+			const prevWidth = categoriaFilterContent.style.width;
+			const prevMinWidth = categoriaFilterContent.style.minWidth;
+			const prevMaxHeight = categoriaFilterContent.style.maxHeight;
+			const wasHidden = getComputedStyle(categoriaFilterContent).display === "none";
+
+			if (wasHidden) {
+				categoriaFilterContent.style.visibility = "hidden";
+				categoriaFilterContent.style.display = "block";
+			}
+			categoriaFilterContent.style.width = "max-content";
+			categoriaFilterContent.style.minWidth = "0";
+			categoriaFilterContent.style.maxHeight = "none";
+
+			const longestOptionWidth = categoriaFilterContent.offsetWidth;
+
+			categoriaFilterContent.style.display = prevDisplay;
+			categoriaFilterContent.style.visibility = prevVisibility;
+			categoriaFilterContent.style.width = prevWidth;
+			categoriaFilterContent.style.minWidth = prevMinWidth;
+			categoriaFilterContent.style.maxHeight = prevMaxHeight;
+
+			const width = Math.max(categoriaFilterTrigger.offsetWidth, longestOptionWidth);
+			categoriaFilterTrigger.style.minWidth = `${width}px`;
+			categoriaFilterContent.style.minWidth = `${width}px`;
+		}
+
+		function filterCategoriaOptions() {
+			const query = foldSearchText(categoriaFilterSearch?.value ?? "");
+			const items = categoriaFilterContent?.querySelectorAll<HTMLElement>(
+				"[data-productos-cat-filter]",
+			);
 			let visible = 0;
-			rows.forEach((row) => {
-				const nombreEl = row.querySelector<HTMLInputElement>('[data-field="nombre"]');
-				const nombre = foldSearchText(nombreEl?.value ?? "");
-				const match = !query || nombre.includes(query);
-				row.hidden = !match;
+			items?.forEach((item) => {
+				const label = foldSearchText(item.textContent ?? "");
+				const match = !query || label.includes(query);
+				item.hidden = !match;
 				if (match) visible += 1;
 			});
-			if (searchEmpty) {
-				searchEmpty.hidden = !(query && rows.length > 0 && visible === 0);
+			if (categoriaFilterEmpty) {
+				categoriaFilterEmpty.hidden = !(query && visible === 0);
 			}
 		}
 
+		function syncCategoriaCheckboxUi() {
+			const selected = new Set(selectedCategorias.get());
+			categoriaFilterContent
+				?.querySelectorAll<HTMLElement>("[data-productos-cat-filter]")
+				.forEach((item) => {
+					const id = item.getAttribute("data-categoria-id");
+					if (id === null) return;
+					item.setAttribute("aria-checked", selected.has(id) ? "true" : "false");
+				});
+		}
+
+		function updateCategoriaFilterLabel() {
+			const n = selectedCategorias.get().length;
+			if (categoriaFilterLabel) {
+				categoriaFilterLabel.textContent =
+					n > 0 ? `Filtrando categorías (${n})` : "Filtrar categorías";
+			}
+			if (categoriaFilterClear) {
+				categoriaFilterClear.hidden = n === 0;
+			}
+		}
+
+		function clearCategoriaFilter() {
+			selectedCategorias.set([]);
+			currentPage.set(1);
+			if (categoriaFilterSearch) {
+				categoriaFilterSearch.value = "";
+				filterCategoriaOptions();
+			}
+			syncCategoriaCheckboxUi();
+			updateCategoriaFilterLabel();
+		}
+
+		function updatePagerUI(from: number, to: number, total: number, hide: boolean) {
+			if (pagerLabel) {
+				pagerLabel.textContent = `Mostrando ${from}–${to} de ${total}`;
+			}
+			if (pager) pager.hidden = hide;
+			const page = currentPage.get();
+			const ps = pageSize.get();
+			const size = ps === "all" ? total : ps;
+			const maxPage = size > 0 ? Math.max(1, Math.ceil(total / size)) : 1;
+			if (pagePrevBtn) pagePrevBtn.disabled = page <= 1;
+			if (pageNextBtn) pageNextBtn.disabled = page >= maxPage;
+		}
+
+		function applyListView() {
+			const query = foldSearchText(searchQuery.get());
+			const selected = selectedCategorias.get();
+			const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-producto-row]"));
+			const matched: HTMLElement[] = [];
+
+			for (const row of rows) {
+				const nombreEl = row.querySelector<HTMLInputElement>('[data-field="nombre"]');
+				const nombre = foldSearchText(nombreEl?.value ?? "");
+				const catEl = row.querySelector<HTMLSelectElement>('[data-field="categoria"]');
+				const catId = catEl?.value ?? "";
+				const catOk = selected.length === 0 || selected.includes(catId);
+				const match = (!query || nombre.includes(query)) && catOk;
+				if (match) matched.push(row);
+				else row.hidden = true;
+			}
+
+			const total = matched.length;
+			const filtersActive = Boolean(query) || selected.length > 0;
+			if (searchEmpty) {
+				searchEmpty.hidden = !(filtersActive && rows.length > 0 && total === 0);
+			}
+			if (searchEmptyMessage) {
+				searchEmptyMessage.textContent =
+					selected.length > 0
+						? "Ningún producto coincide con los filtros."
+						: "Ningún producto coincide con la búsqueda.";
+			}
+
+			const ps = pageSize.get();
+			if (ps === "all") {
+				for (const row of matched) row.hidden = false;
+				updatePagerUI(total === 0 ? 0 : 1, total, total, true);
+				return;
+			}
+
+			const size = ps;
+			const maxPage = Math.max(1, Math.ceil(total / size) || 1);
+			const page = currentPage.get();
+			const clamped = Math.min(Math.max(1, page), maxPage);
+			if (clamped !== page) {
+				currentPage.set(clamped);
+				return;
+			}
+
+			const start = total === 0 ? 0 : (page - 1) * size;
+			const end = Math.min(start + size, total);
+			matched.forEach((row, i) => {
+				row.hidden = i < start || i >= end;
+			});
+
+			const from = total === 0 ? 0 : start + 1;
+			const to = total === 0 ? 0 : end;
+			updatePagerUI(from, to, total, total <= size);
+		}
+
 		searchInput?.addEventListener("input", () => {
+			currentPage.set(1);
 			searchQuery.set(searchInput.value);
 		});
-		searchQuery.subscribe(applySearchFilter);
-		applySearchFilter();
+
+		pageSizeSelect?.addEventListener("starwind-select:change", ((e: SelectChangeEvent) => {
+			const next = parsePageSize(e.detail.value);
+			if (next === null) return;
+			pageSize.set(next);
+			currentPage.set(1);
+		}) as EventListener);
+
+		// Dropdown content is portaled to document.body, so the change event
+		// does not bubble through [data-categoria-filter] — listen on document.
+		document.addEventListener("starwind-dropdown-checkbox:change", ((
+			e: CustomEvent<{ checked: boolean }>,
+		) => {
+			if (!root.isConnected) return;
+			const item = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+				"[data-productos-cat-filter]",
+			);
+			if (!item) return;
+			const id = item.getAttribute("data-categoria-id");
+			if (id === null) return;
+			const current = selectedCategorias.get();
+			if (e.detail.checked) {
+				if (!current.includes(id)) selectedCategorias.set([...current, id]);
+			} else {
+				selectedCategorias.set(current.filter((c) => c !== id));
+			}
+			currentPage.set(1);
+			updateCategoriaFilterLabel();
+		}) as EventListener);
+
+		categoriaFilterSearch?.addEventListener("input", () => {
+			filterCategoriaOptions();
+		});
+		categoriaFilterSearch?.addEventListener("keydown", (e) => {
+			// Keep Dropdown keyboard nav from stealing typing / Space / Enter.
+			e.stopPropagation();
+		});
+		categoriaFilterSearch?.addEventListener("click", (e) => {
+			e.stopPropagation();
+		});
+
+		categoriaFilterClear?.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			clearCategoriaFilter();
+		});
+
+		pagePrevBtn?.addEventListener("click", () => {
+			currentPage.set(Math.max(1, currentPage.get() - 1));
+		});
+		pageNextBtn?.addEventListener("click", () => {
+			currentPage.set(currentPage.get() + 1);
+		});
+
+		searchQuery.subscribe(applyListView);
+		pageSize.subscribe(applyListView);
+		currentPage.subscribe(applyListView);
+		selectedCategorias.subscribe(applyListView);
+		updateCategoriaFilterLabel();
+		filterCategoriaOptions();
+		sizeCategoriaFilter();
+		applyListView();
 
 		let categoriaIds = new Set<string>();
 		try {
@@ -553,12 +853,12 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 					setProductoFieldError(id, "nombre", "Nombre obligatorio");
 					// Keep out of pending until valid
 					setProductoField(id, "nombre", original, original);
-					applySearchFilter();
+					applyListView();
 					return;
 				}
 				setProductoFieldError(id, "nombre", null);
 				setProductoField(id, "nombre", trimmed, original);
-				applySearchFilter();
+				applyListView();
 				return;
 			}
 
@@ -582,10 +882,12 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				if (value !== null && !categoriaIds.has(value)) {
 					setProductoFieldError(id, "categoria", "Categoría inválida");
 					setProductoField(id, "categoria", original, original);
+					applyListView();
 					return;
 				}
 				setProductoFieldError(id, "categoria", null);
 				setProductoField(id, "categoria", value, original);
+				applyListView();
 			}
 		}
 
@@ -711,7 +1013,7 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				}
 				dropProductoPending(id);
 				root.querySelector(`[data-producto-row="${id}"]`)?.remove();
-				applySearchFilter();
+				applyListView();
 				showToast("success", "Producto eliminado.");
 			} catch (err) {
 				showToast("error", err instanceof Error ? err.message : "Error de red");

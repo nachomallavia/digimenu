@@ -27,7 +27,7 @@ export const selectContent = tv({
 });
 
 export const selectContentInner = tv({
-  base: "max-h-96 w-full min-w-(--select-trigger-width) overflow-y-auto p-1",
+  base: "max-h-96 w-full min-w-(--starwind-select-trigger-width) overflow-y-auto p-1",
 });
 
 export const selectItem = tv({

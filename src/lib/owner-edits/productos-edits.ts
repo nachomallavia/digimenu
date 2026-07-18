@@ -22,6 +22,12 @@ export const fieldErrors = map<Record<string, Partial<Record<ProductoField, stri
 export const saving = atom(false);
 export const searchQuery = atom("");
 
+export type PageSize = 10 | 20 | 50 | 100 | "all";
+export const pageSize = atom<PageSize>(20);
+export const currentPage = atom(1);
+/** Empty array = no filter (show all). Includes `""` for Sin categoría. */
+export const selectedCategorias = atom<string[]>([]);
+
 export const productosPendingCount = pendingCount(pending);
 export const productosHasFieldErrors = hasAnyFieldErrors(fieldErrors);
 
