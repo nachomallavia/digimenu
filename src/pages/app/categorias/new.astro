@@ -1,0 +1,157 @@
+---
+import Dashboard from "@/layouts/Dashboard.astro";
+import { requireOwner } from "@/lib/auth/require-owner";
+import {
+	createCategoriaViaApi,
+	formImageFile,
+	listCategoriasForRestaurant,
+	uploadMediaViaApi,
+	writesEnabled,
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "@/lib/emdash/owner-restaurant";
+import { CATEGORY_ICON_OPTIONS, isCategoryIconId } from "@/lib/category-icons";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const canWrite = writesEnabled();
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+
+let error: string | null = null;
+let formValues = {
+	nombre: "",
+	icon: "",
+};
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const nombre = String(form.get("nombre") ?? "").trim();
+	const iconRaw = String(form.get("icon") ?? "").trim();
+	const coverFile = formImageFile(form, "cover");
+
+	formValues = {
+		nombre,
+		icon: iconRaw && isCategoryIconId(iconRaw) ? iconRaw : "",
+	};
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (!nombre) throw new Error("El nombre es obligatorio.");
+
+			const icon = formValues.icon || null;
+			const cover = coverFile ? await uploadMediaViaApi(coverFile, nombre) : undefined;
+
+			const { entries } = await listCategoriasForRestaurant(restaurantId);
+			const maxOrden = entries.reduce((max, c) => Math.max(max, c.data.orden ?? 0), -1);
+
+			await createCategoriaViaApi({
+				nombre,
+				restauranteId: restaurantId,
+				orden: maxOrden + 1,
+				icon,
+				...(cover !== undefined ? { cover } : {}),
+			});
+
+			return Astro.redirect(savedRedirect("/app/categorias", { action: "create" }));
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo crear la categoría";
+		}
+	}
+}
+---
+
+<Dashboard
+	title="DigiMenu — Nueva categoría"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<p class="mb-1 text-sm">
+				<a href="/app/categorias" class="text-muted-foreground hover:text-foreground">
+					← Categorías
+				</a>
+			</p>
+			<h1 class="text-2xl font-semibold tracking-tight">Nueva categoría</h1>
+			<p class="text-muted-foreground">
+				Sección del menú. Opcionalmente elegí un icono y/o una imagen de portada.
+			</p>
+		</div>
+
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Datos</CardTitle>
+				<CardDescription>Nombre, icono y portada para agrupar productos.</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-4" enctype="multipart/form-data" data-astro-reload>
+					<div class="flex flex-col gap-1.5">
+						<Label for="nombre">Nombre</Label>
+						<Input
+							id="nombre"
+							name="nombre"
+							required
+							placeholder="Ej. Postres"
+							value={formValues.nombre}
+							disabled={!canWrite}
+						/>
+					</div>
+
+					<div class="flex flex-col gap-1.5">
+						<Label for="icon">Icono (opcional)</Label>
+						<select
+							id="icon"
+							name="icon"
+							disabled={!canWrite}
+							class="border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+						>
+							<option value="" selected={!formValues.icon}>
+								Sin icono
+							</option>
+							{CATEGORY_ICON_OPTIONS.map((opt) => (
+								<option value={opt.id} selected={formValues.icon === opt.id}>
+									{opt.label}
+								</option>
+							))}
+						</select>
+					</div>
+
+					<div class="flex flex-col gap-2">
+						<Label for="cover">Portada (opcional)</Label>
+						<Input
+							id="cover"
+							name="cover"
+							type="file"
+							accept="image/*"
+							disabled={!canWrite}
+						/>
+					</div>
+
+					<div class="flex flex-wrap gap-2">
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Crear categoría
+						</Button>
+						<Button href="/app/categorias" variant="outline">
+							Cancelar
+						</Button>
+					</div>
+				</form>
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>

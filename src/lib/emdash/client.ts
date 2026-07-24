@@ -33,6 +33,13 @@ export function imageSrc(image: EmDashImage): string | undefined {
 	return key ? `/_emdash/api/media/file/${key}` : undefined;
 }
 
+/** Value shape EmDash content API accepts for image fields. */
+export function imageRefForWrite(
+	image: { id: string } | null,
+): { id: string } | null {
+	return image ? { id: image.id } : null;
+}
+
 export type EmDashProducto = {
 	id: string;
 	slug: string | null;
@@ -45,6 +52,36 @@ export type EmDashProducto = {
 		imagen?: EmDashImage;
 		restaurante?: string;
 		categoria?: string;
+		/** JSON array of menu content ULIDs */
+		menus?: unknown;
+		/** JSON array of tag content ULIDs */
+		tags?: unknown;
+	};
+};
+
+export type EmDashMenu = {
+	id: string;
+	slug: string | null;
+	status: string;
+	data: {
+		id: string;
+		nombre: string;
+		descripcion?: string | null;
+		restaurante?: string;
+		orden?: number | null;
+		plantilla?: string | null;
+	};
+};
+
+export type EmDashTag = {
+	id: string;
+	slug: string | null;
+	status: string;
+	data: {
+		id: string;
+		nombre: string;
+		restaurante?: string;
+		icon?: string | null;
 	};
 };
 
@@ -56,7 +93,8 @@ export type EmDashRestaurante = {
 		id: string;
 		nombre: string;
 		descripcion?: string;
-		logo?: EmDashImage;
+		logo_light?: EmDashImage;
+		logo_dark?: EmDashImage;
 		menu_layout?: unknown;
 		theme?: unknown;
 	};
@@ -92,6 +130,31 @@ function requireWrites() {
 	if (!getEmDashApiConfig()) {
 		throw new Error("EMDASH_API_BASE and EMDASH_API_TOKEN required for writes");
 	}
+}
+
+async function publishContent(collection: string, id: string) {
+	try {
+		await emdashJson(
+			`/_emdash/api/content/${encodeURIComponent(collection)}/${encodeURIComponent(id)}/publish`,
+			{ method: "POST", body: "{}" },
+		);
+	} catch {
+		// Already published / no draft — ignore.
+	}
+}
+
+function slugifyNombre(nombre: string): string {
+	return nombre
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "");
+}
+
+function isSlugConflictError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+	return msg.includes("slug") && (msg.includes("unique") || msg.includes("taken") || msg.includes("exist") || msg.includes("conflict") || msg.includes("duplicate"));
 }
 
 /** Non-empty File from multipart form field, or null. */
@@ -191,6 +254,8 @@ export async function listProductosForRestaurant(restaurantId: string) {
 				imagen: e.data.imagen ?? null,
 				restaurante: e.data.restaurante,
 				categoria: e.data.categoria ?? null,
+				menus: e.data.menus ?? [],
+				tags: e.data.tags ?? [],
 			},
 		})),
 	);
@@ -286,14 +351,17 @@ export function assertCategoriaBelongsToRestaurant(
 	return categoria.data.restaurante === restaurantId;
 }
 
-export async function createCategoriaViaApi(input: {
-	nombre: string;
-	restauranteId: string;
-	icon?: string | null;
-	cover?: EmDashImage | null;
-	orden?: number;
-	slug?: string;
-}) {
+export async function createCategoriaViaApi(
+	input: {
+		nombre: string;
+		restauranteId: string;
+		icon?: string | null;
+		cover?: EmDashImage | null;
+		orden?: number;
+		slug?: string;
+	},
+	opts?: { skipCacheBust?: boolean },
+) {
 	requireWrites();
 	const slug =
 		input.slug?.trim() ||
@@ -319,7 +387,9 @@ export async function createCategoriaViaApi(input: {
 	if (created.item?.id) {
 		await publishContent("categorias", created.item.id);
 	}
-	await bustOwnerListCache(input.restauranteId, "both");
+	if (!opts?.skipCacheBust) {
+		await bustOwnerListCache(input.restauranteId, "both");
+	}
 	return created;
 }
 
@@ -356,45 +426,298 @@ export async function deleteCategoriaViaApi(id: string, restaurantId: string) {
 	return result;
 }
 
-// ---------- Productos (writes) ----------
+// ---------- Menús (collection, per-restaurant) ----------
 
-async function publishContent(collection: string, id: string) {
-	try {
-		await emdashJson(
-			`/_emdash/api/content/${encodeURIComponent(collection)}/${encodeURIComponent(id)}/publish`,
-			{ method: "POST", body: "{}" },
-		);
-	} catch {
-		// Already published / no draft — ignore.
-	}
+function sortMenus(entries: EmDashMenu[]): EmDashMenu[] {
+	return [...entries].sort((a, b) => {
+		const oa = a.data.orden ?? Number.MAX_SAFE_INTEGER;
+		const ob = b.data.orden ?? Number.MAX_SAFE_INTEGER;
+		if (oa !== ob) return oa - ob;
+		return (a.data.nombre ?? "").localeCompare(b.data.nombre ?? "");
+	});
 }
 
-export async function createProductoViaApi(input: {
-	nombre: string;
-	precio: number;
-	descripcion?: string;
-	restauranteId: string;
-	categoriaId?: string | null;
-	slug?: string;
-}) {
+export async function listMenusForRestaurant(restaurantId: string) {
+	const cached = await getCachedList("menus", restaurantId);
+	if (cached) {
+		return { entries: sortMenus(cached as EmDashMenu[]), cacheHint: undefined };
+	}
+
+	const { entries, cacheHint, error } = await getEmDashCollection("menus", {
+		where: { restaurante: restaurantId },
+		limit: 50,
+	});
+	if (error) throw new Error(error.message ?? "Failed to list menus");
+	const typed = sortMenus(entries as unknown as EmDashMenu[]);
+	await setCachedList(
+		"menus",
+		restaurantId,
+		typed.map((e) => ({
+			id: e.id,
+			slug: e.slug,
+			status: e.status,
+			data: {
+				id: e.data.id,
+				nombre: e.data.nombre,
+				descripcion: e.data.descripcion ?? null,
+				restaurante: e.data.restaurante,
+				orden: e.data.orden ?? null,
+				plantilla: e.data.plantilla ?? null,
+			},
+		})),
+	);
+	return { entries: typed, cacheHint };
+}
+
+export async function getMenuBySlug(idOrSlug: string) {
+	const { entry, cacheHint, error } = await getEmDashEntry("menus", idOrSlug);
+	if (error) throw new Error(error.message ?? "Failed to get menu");
+	return { entry: entry as EmDashMenu | null, cacheHint };
+}
+
+export function assertMenuBelongsToRestaurant(menu: EmDashMenu, restaurantId: string): boolean {
+	return menu.data.restaurante === restaurantId;
+}
+
+export async function createMenuViaApi(
+	input: {
+		nombre: string;
+		restauranteId: string;
+		descripcion?: string | null;
+		plantilla?: string;
+		orden?: number;
+		slug?: string;
+	},
+	opts?: { skipCacheBust?: boolean },
+) {
 	requireWrites();
-	const created = await emdashJson<ContentApiResponse>("/_emdash/api/content/productos", {
+	const slug =
+		input.slug?.trim() ||
+		slugifyNombre(input.nombre) ||
+		`menu-${Date.now().toString(36)}`;
+	const created = await emdashJson<ContentApiResponse>("/_emdash/api/content/menus", {
 		method: "POST",
 		body: JSON.stringify({
-			slug: input.slug,
+			slug: slug || undefined,
 			data: {
 				nombre: input.nombre,
-				precio: input.precio,
-				descripcion: input.descripcion,
+				descripcion: input.descripcion ?? null,
 				restaurante: input.restauranteId,
-				...(input.categoriaId !== undefined ? { categoria: input.categoriaId } : {}),
+				orden: input.orden ?? 0,
+				plantilla: input.plantilla ?? "classic",
 			},
 		}),
 	});
 	if (created.item?.id) {
+		await publishContent("menus", created.item.id);
+	}
+	if (!opts?.skipCacheBust) {
+		await bustOwnerListCache(input.restauranteId, "menus");
+	}
+	return created;
+}
+
+export async function updateMenuViaApi(
+	id: string,
+	data: {
+		nombre?: string;
+		descripcion?: string | null;
+		plantilla?: string;
+		orden?: number;
+	},
+	restaurantId: string,
+) {
+	requireWrites();
+	const updated = await emdashJson<ContentApiResponse>(
+		`/_emdash/api/content/menus/${encodeURIComponent(id)}`,
+		{
+			method: "PUT",
+			body: JSON.stringify({ data }),
+		},
+	);
+	await publishContent("menus", id);
+	await bustOwnerListCache(restaurantId, "menus");
+	return updated;
+}
+
+export async function deleteMenuViaApi(id: string, restaurantId: string) {
+	requireWrites();
+	const result = await emdashJson(`/_emdash/api/content/menus/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+	});
+	await bustOwnerListCache(restaurantId, "menus");
+	return result;
+}
+
+// ---------- Tags / etiquetas (collection, per-restaurant) ----------
+
+function sortTags(entries: EmDashTag[]): EmDashTag[] {
+	return [...entries].sort((a, b) =>
+		(a.data.nombre ?? "").localeCompare(b.data.nombre ?? ""),
+	);
+}
+
+export async function listTagsForRestaurant(restaurantId: string) {
+	const cached = await getCachedList("tags", restaurantId);
+	if (cached) {
+		return { entries: sortTags(cached as EmDashTag[]), cacheHint: undefined };
+	}
+
+	const { entries, cacheHint, error } = await getEmDashCollection("tags", {
+		where: { restaurante: restaurantId },
+		limit: 100,
+	});
+	if (error) throw new Error(error.message ?? "Failed to list tags");
+	const typed = sortTags(entries as unknown as EmDashTag[]);
+	await setCachedList(
+		"tags",
+		restaurantId,
+		typed.map((e) => ({
+			id: e.id,
+			slug: e.slug,
+			status: e.status,
+			data: {
+				id: e.data.id,
+				nombre: e.data.nombre,
+				restaurante: e.data.restaurante,
+				icon: e.data.icon ?? null,
+			},
+		})),
+	);
+	return { entries: typed, cacheHint };
+}
+
+export async function getTagBySlug(idOrSlug: string) {
+	const { entry, cacheHint, error } = await getEmDashEntry("tags", idOrSlug);
+	if (error) throw new Error(error.message ?? "Failed to get tag");
+	return { entry: entry as EmDashTag | null, cacheHint };
+}
+
+export function assertTagBelongsToRestaurant(tag: EmDashTag, restaurantId: string): boolean {
+	return tag.data.restaurante === restaurantId;
+}
+
+export async function createTagViaApi(
+	input: {
+		nombre: string;
+		restauranteId: string;
+		icon?: string | null;
+		slug?: string;
+	},
+	opts?: { skipCacheBust?: boolean },
+) {
+	requireWrites();
+	const slug =
+		input.slug?.trim() ||
+		slugifyNombre(input.nombre) ||
+		`tag-${Date.now().toString(36)}`;
+	const created = await emdashJson<ContentApiResponse>("/_emdash/api/content/tags", {
+		method: "POST",
+		body: JSON.stringify({
+			slug: slug || undefined,
+			data: {
+				nombre: input.nombre,
+				restaurante: input.restauranteId,
+				icon: input.icon ?? null,
+			},
+		}),
+	});
+	if (created.item?.id) {
+		await publishContent("tags", created.item.id);
+	}
+	if (!opts?.skipCacheBust) {
+		await bustOwnerListCache(input.restauranteId, "tags");
+	}
+	return created;
+}
+
+export async function updateTagViaApi(
+	id: string,
+	data: { nombre?: string; icon?: string | null },
+	restaurantId: string,
+) {
+	requireWrites();
+	const updated = await emdashJson<ContentApiResponse>(
+		`/_emdash/api/content/tags/${encodeURIComponent(id)}`,
+		{
+			method: "PUT",
+			body: JSON.stringify({ data }),
+		},
+	);
+	await publishContent("tags", id);
+	await bustOwnerListCache(restaurantId, "tags");
+	return updated;
+}
+
+export async function deleteTagViaApi(id: string, restaurantId: string) {
+	requireWrites();
+	const result = await emdashJson(`/_emdash/api/content/tags/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+	});
+	await bustOwnerListCache(restaurantId, "tags");
+	return result;
+}
+
+// ---------- Productos (writes) ----------
+
+export async function createProductoViaApi(
+	input: {
+		nombre: string;
+		precio: number;
+		descripcion?: string | null;
+		restauranteId: string;
+		categoriaId?: string | null;
+		menuIds?: string[];
+		tagIds?: string[];
+		imagen?: EmDashImage | null;
+		slug?: string;
+	},
+	opts?: { skipCacheBust?: boolean },
+) {
+	requireWrites();
+	const baseSlug =
+		input.slug?.trim() || slugifyNombre(input.nombre) || `producto-${Date.now().toString(36)}`;
+	const imagenWrite =
+		input.imagen === undefined
+			? undefined
+			: input.imagen === null
+				? null
+				: imageRefForWrite(input.imagen.id ? { id: input.imagen.id } : null);
+
+	const data = {
+		nombre: input.nombre,
+		precio: input.precio,
+		descripcion: input.descripcion,
+		restaurante: input.restauranteId,
+		...(input.categoriaId !== undefined ? { categoria: input.categoriaId } : {}),
+		...(input.menuIds !== undefined ? { menus: input.menuIds } : {}),
+		...(input.tagIds !== undefined ? { tags: input.tagIds } : {}),
+		...(imagenWrite !== undefined ? { imagen: imagenWrite } : {}),
+	};
+
+	let created: ContentApiResponse | null = null;
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 5; attempt++) {
+		const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+		try {
+			created = await emdashJson<ContentApiResponse>("/_emdash/api/content/productos", {
+				method: "POST",
+				body: JSON.stringify({ slug, data }),
+			});
+			break;
+		} catch (err) {
+			lastError = err;
+			if (!isSlugConflictError(err) || attempt === 4) throw err;
+		}
+	}
+	if (!created) throw lastError instanceof Error ? lastError : new Error("No se pudo crear el producto");
+
+	if (created.item?.id) {
 		await publishContent("productos", created.item.id);
 	}
-	await bustOwnerListCache(input.restauranteId, "both");
+	if (!opts?.skipCacheBust) {
+		await bustOwnerListCache(input.restauranteId, "both");
+	}
 	return created;
 }
 
@@ -404,15 +727,24 @@ export type ProductoUpdateData = {
 	descripcion?: string | null;
 	imagen?: EmDashImage | null;
 	categoria?: string | null;
+	menus?: string[];
+	tags?: string[];
 };
 
 async function putProductoViaApi(id: string, data: ProductoUpdateData) {
 	requireWrites();
+	const payload: Record<string, unknown> = { ...data };
+	if ("imagen" in data) {
+		payload.imagen =
+			data.imagen === null || data.imagen === undefined
+				? data.imagen
+				: imageRefForWrite(data.imagen.id ? { id: data.imagen.id } : null);
+	}
 	const updated = await emdashJson<ContentApiResponse>(
 		`/_emdash/api/content/productos/${encodeURIComponent(id)}`,
 		{
 			method: "PUT",
-			body: JSON.stringify({ data }),
+			body: JSON.stringify({ data: payload }),
 		},
 	);
 	await publishContent("productos", id);
@@ -423,11 +755,16 @@ export async function updateProductoViaApi(
 	id: string,
 	data: ProductoUpdateData,
 	restaurantId: string,
+	opts?: { skipCacheBust?: boolean },
 ) {
 	const updated = await putProductoViaApi(id, data);
-	await bustOwnerListCache(restaurantId, "both");
+	if (!opts?.skipCacheBust) {
+		await bustOwnerListCache(restaurantId, "both");
+	}
 	return updated;
 }
+
+export { bustOwnerListCache };
 
 /**
  * Batch product updates with a single owner-list cache bust.

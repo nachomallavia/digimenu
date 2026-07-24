@@ -57,10 +57,11 @@ export interface Restaurante {
   status: string;
   nombre: string;
   descripcion?: string;
-  logo?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
   menu_layout?: unknown;
   theme?: unknown;
   category_meta?: unknown;
+  logo_dark?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
+  logo_light?: { id: string; src?: string; alt?: string; width?: number; height?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> };
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;

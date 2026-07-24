@@ -4,13 +4,13 @@
  */
 import BuildingStoreIcon from "@tabler/icons/outline/building-store.svg";
 import LayoutListIcon from "@tabler/icons/outline/layout-list.svg";
-import PaletteIcon from "@tabler/icons/outline/palette.svg";
 import TagsIcon from "@tabler/icons/outline/tags.svg";
 import PackageIcon from "@tabler/icons/outline/package.svg";
 import HomeIcon from "@tabler/icons/outline/home.svg";
 import SunIcon from "@tabler/icons/outline/sun.svg";
 import MoonIcon from "@tabler/icons/outline/moon.svg";
 import DeviceDesktopIcon from "@tabler/icons/outline/device-desktop.svg";
+import ListDetailsIcon from "@tabler/icons/outline/list-details.svg";
 import {
 	Sidebar,
 	SidebarContent,
@@ -50,11 +50,11 @@ const {
 
 const items = [
 	{ title: "Resumen", href: "/app", icon: HomeIcon, matchExact: true },
-	{ title: "Info restaurante", href: "/app/info", icon: BuildingStoreIcon },
-	{ title: "Tipo de menú", href: "/app/menu", icon: LayoutListIcon },
-	{ title: "Estilos", href: "/app/estilos", icon: PaletteIcon },
-	{ title: "Categorías", href: "/app/categorias", icon: TagsIcon },
+	{ title: "Restaurant", href: "/app/info", icon: BuildingStoreIcon },
+	{ title: "Menús", href: "/app/menus", icon: LayoutListIcon },
 	{ title: "Productos", href: "/app/productos", icon: PackageIcon },
+	{ title: "Categorías", href: "/app/categorias", icon: TagsIcon },
+	{ title: "Etiquetas", href: "/app/etiquetas", icon: ListDetailsIcon },
 ];
 
 const themeOptions = [
@@ -81,12 +81,6 @@ function isActive(href: string, exact?: boolean) {
 					</div>
 					<div class="grid flex-1 text-left text-sm leading-tight">
 						<span class="truncate font-semibold">DigiMenu</span>
-						<!-- <span
-							class="text-sidebar-foreground/70 truncate text-xs"
-							data-owner-restaurant-name
-						>
-							{restaurantName ?? restaurantSlug ?? "Panel"}
-						</span> -->
 					</div>
 				</SidebarMenuButton>
 			</SidebarMenuItem>

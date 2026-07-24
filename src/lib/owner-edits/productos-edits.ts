@@ -28,6 +28,11 @@ export const currentPage = atom(1);
 /** Empty array = no filter (show all). Includes `""` for Sin categoría. */
 export const selectedCategorias = atom<string[]>([]);
 
+export type SortColumn = "nombre" | "categoria" | "precio";
+export type SortDir = "asc" | "desc";
+export const sortColumn = atom<SortColumn | null>(null);
+export const sortDir = atom<SortDir>("asc");
+
 export const productosPendingCount = pendingCount(pending);
 export const productosHasFieldErrors = hasAnyFieldErrors(fieldErrors);
 

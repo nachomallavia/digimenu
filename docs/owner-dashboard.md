@@ -19,16 +19,39 @@ All owner pages call `requireOwner()`. OAuth / self-serve onboarding are out of 
 | Path | Purpose |
 |------|---------|
 | `/app` | Resumen (SSR counts from live collections) |
-| `/app/info` | Info restaurante (nombre, descripción, logo) |
-| `/app/menu` | Tipo de menú (`menu_layout` JSON) |
-| `/app/estilos` | Estilos / theme tokens (`theme` JSON) |
-| `/app/categorias` | CRUD colección `categorias` (nombre + icono + portada en un solo form) |
-| `/app/productos` | Lista con edición inline (nombre / categoría / precio) + batch save |
+| `/app/info` | Restaurant (nombre, descripción, logos claro/oscuro) |
+| `/app/menus` | Lista de menús (cartas) del restaurante |
+| `/app/menus/new` | Crear menú (nombre, descripción, plantilla) |
+| `/app/menus/[id]` | Detalle del menú: tabs Estilo + Lista de productos |
+| `/app/etiquetas` | Etiquetas del restaurante |
+| `/app/etiquetas/new` | Crear etiqueta |
+| `/app/categorias` | Lista / editar colección `categorias` (nombre + icono + portada) |
+| `/app/categorias/new` | Crear categoría (nombre, icono, portada) |
+| `/app/productos` | Lista con edición inline (nombre / categoría / precio) + batch save + CSV |
+| `/app/productos/new` | Crear producto (nombre, precio, descripción, categoría, imagen) |
 | `/app/productos/[id]` | Detalle / editar / borrar + categoría (select único) + imagen |
 | `/app/login` | Magic link |
 | `/app/pending` | Logged in, no restaurant link |
 
-Mutations are usually form POST on these pages. Exception: `/app/productos` accepts `POST` with `Content-Type: application/json` for `batchUpdate` (multi-row save via nanostores pending map) and `delete` (row trash), returning JSON without a full page reload. Client state lives in `src/lib/owner-edits/`.
+Legacy redirects: `/app/menu` → `/app/menus`; `/app/estilos` → `/app/menus/{default}`; `/app/menus/[id]/estilo` y `.../productos` → detalle con tab.
+
+Mutations are usually form POST on these pages. Exception: `/app/productos` accepts `POST` with `Content-Type: application/json` for `batchUpdate` (multi-row save via nanostores pending map), `delete` (row trash), and CSV actions (`exportCsv`, `previewCsvImport`, `importCsv`), returning JSON (or `text/csv` for export) without a full page reload. Client state lives in `src/lib/owner-edits/`.
+
+### Productos CSV
+
+Buttons **Descargar CSV** / **Subir CSV** on `/app/productos`. Helpers: [`src/lib/owner-edits/productos-csv.ts`](../src/lib/owner-edits/productos-csv.ts), server orchestration in [`productos-csv-server.ts`](../src/lib/owner-edits/productos-csv-server.ts).
+
+| Column | Notes |
+|--------|--------|
+| `nombre` | Required |
+| `descripcion` | Optional |
+| `precio` | Required, ≥ 0 |
+| `categoria` | Display name. Empty → no category. Match = lowercase, no accents, no spaces. |
+| `imagen` | Absolute URL. Empty on update → leave image; on create → no image. If URL differs from current → download + upload to media (same-origin allowed; other private hosts blocked). |
+| `id` | Product ULID (last columns — leave as exported). Empty → create. Do not invent or edit. |
+| `id_sig` | HMAC of `restaurantId:id` (session secret). Required with `id`; mismatch → row rejected. |
+
+Import never deletes products. Max 200 rows. Rows without `id` are **creates** (slug auto-generated from `nombre`) and are listed in a confirmation dialog before writing. New category names (after normalize) appear in the same dialog; near-matches (Levenshtein) default to **Use existing**; user can force **Create**. Resolutions sent as `categoriaResolutions`.
 
 ## Writes
 
@@ -59,15 +82,23 @@ Owner forms upload images via the same PAT: `POST /_emdash/api/media` (multipart
 | Surface | Field |
 |---------|--------|
 | Producto detalle | `productos.imagen` |
-| Info | `restaurantes.logo` |
+| Info | `restaurantes.logo_light`, `restaurantes.logo_dark` |
 | Categorías | `categorias.cover` |
 
 Default EmDash max file size is 10MB. With R2 binding, uploads go through the Worker (no client pre-signed URLs).
 
 ## Schema fields on `restaurantes`
 
-- `menu_layout` (json): `{ columns: 1|2, navigation: "por_categorias"|"scroll_unico", showImages: boolean }`
+- `menu_layout` (json): legacy display knobs (`columns`, `navigation`, `showImages`) — still read by Classic template; plantilla vive en cada `menus.plantilla`
 - `theme` (json): mode, colors, fonts, radius (see `src/lib/restaurant-theme.ts`)
+
+## Menús (`menus` collection)
+
+Per-restaurant cartas: `nombre` (req), `restaurante` (ref, req), `descripcion`, `orden`, `plantilla` (string; default `classic`). Products link via JSON `productos.menus: string[]` (many-to-many). Default after migration: one “Carta” with all products assigned.
+
+## Etiquetas (`tags` collection)
+
+Per-restaurant tags: `nombre` (req), `restaurante` (ref, req), `icon` (optional). Products link via JSON `productos.tags: string[]`.
 
 ## Categorías (`categorias` collection)
 
@@ -87,7 +118,7 @@ Product/category mutations never touch the session cookie. Restaurant-level muta
 | `/app/productos` | `listProductosForRestaurant` → `<ul>` in Astro |
 | `/app/categorias` | `listCategoriasForRestaurant` → forms mapped in Astro |
 | `/app/productos/[id]` | `getProductoBySlug` + `listCategoriasForRestaurant` (select) |
-| `/app/info`, `/menu`, `/estilos` | `fromSession` restaurant snapshot (`logo` included; old cookies fall back to one EmDash read + upgrade via `requireLogo`) |
+| `/app/info`, `/app/menus/*`, `/app/etiquetas` | menus/tags: live collections; info/estilo theme: `fromSession` restaurant snapshot |
 
 ### Owner list cache (Workers)
 

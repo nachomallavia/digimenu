@@ -1,0 +1,936 @@
+---
+import Dashboard from "@/layouts/Dashboard.astro";
+import SearchIcon from "@tabler/icons/outline/search.svg";
+import FilterIcon from "@tabler/icons/outline/filter.svg";
+import { refreshOwnerSnapshot, requireOwner } from "@/lib/auth/require-owner";
+import {
+	assertMenuBelongsToRestaurant,
+	assertProductoBelongsToRestaurant,
+	getMenuBySlug,
+	getProductoBySlug,
+	listCategoriasForRestaurant,
+	listMenusForRestaurant,
+	listProductosForRestaurant,
+	updateMenuViaApi,
+	updateProductoViaApi,
+	updateRestauranteViaApi,
+	writesEnabled,
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "@/lib/emdash/owner-restaurant";
+import { menuPathId } from "@/lib/emdash/owner-menus";
+import { parseIdList } from "@/lib/menu-templates/ids";
+import { listMenuTemplates, resolveMenuTemplateId } from "@/lib/menu-templates/registry";
+import {
+	DEFAULT_RESTAURANT_THEME,
+	FONT_OPTIONS,
+	parseRestaurantTheme,
+	type ThemeMode,
+	type ThemeRadius,
+} from "@/lib/restaurant-theme";
+import { Button } from "@/components/starwind/button";
+import {
+	Dropdown,
+	DropdownCheckboxItem,
+	DropdownContent,
+	DropdownTrigger,
+} from "@/components/starwind/dropdown";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/starwind/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const canWrite = writesEnabled();
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+const menuParam = Astro.params.id;
+if (!menuParam) {
+	return Astro.redirect("/app/menus");
+}
+
+const { entry: menuEntry } = await getMenuBySlug(menuParam);
+if (!menuEntry || !assertMenuBelongsToRestaurant(menuEntry, restaurantId)) {
+	return Astro.redirect("/app/menus");
+}
+
+const menuId = menuEntry.data.id;
+const pathId = menuPathId(menuEntry);
+const tabRaw = Astro.url.searchParams.get("tab");
+const tab = tabRaw === "productos" ? "productos" : "estilo";
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+const templates = listMenuTemplates();
+
+async function toggleProductOnMenu(productId: string, assigned: boolean) {
+	const { entry } = await getProductoBySlug(productId);
+	if (!entry || !assertProductoBelongsToRestaurant(entry, restaurantId)) {
+		throw new Error("Producto no encontrado.");
+	}
+	const current = parseIdList(entry.data.menus);
+	const next = assigned
+		? current.includes(menuId)
+			? current
+			: [...current, menuId]
+		: current.filter((id) => id !== menuId);
+	await updateProductoViaApi(productId, { menus: next }, restaurantId);
+}
+
+const contentType = Astro.request.headers.get("content-type") ?? "";
+if (Astro.request.method === "POST" && contentType.includes("application/json")) {
+	let body: unknown;
+	try {
+		body = await Astro.request.json();
+	} catch {
+		return Response.json({ ok: false, error: "JSON inválido." }, { status: 400 });
+	}
+	const action =
+		typeof body === "object" && body && "action" in body
+			? String((body as { action: unknown }).action ?? "")
+			: "";
+
+	if (!canWrite) {
+		return Response.json(
+			{ ok: false, error: "Escrituras no configuradas (falta EMDASH_API_TOKEN)." },
+			{ status: 403 },
+		);
+	}
+
+	if (action === "toggle-product") {
+		const productId =
+			typeof body === "object" && body && "productId" in body
+				? String((body as { productId: unknown }).productId ?? "")
+				: "";
+		const assigned =
+			typeof body === "object" && body && "assigned" in body
+				? Boolean((body as { assigned: unknown }).assigned)
+				: false;
+		if (!productId) {
+			return Response.json({ ok: false, error: "Id requerido." }, { status: 400 });
+		}
+		try {
+			await toggleProductOnMenu(productId, assigned);
+			return Response.json({ ok: true, assigned });
+		} catch (err) {
+			return Response.json(
+				{ ok: false, error: err instanceof Error ? err.message : "No se pudo actualizar" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	return Response.json({ ok: false, error: "Acción desconocida." }, { status: 400 });
+}
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const action = String(form.get("action") ?? "");
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (action === "plantilla") {
+				const plantilla = resolveMenuTemplateId(form.get("plantilla"));
+				await updateMenuViaApi(menuEntry.data.id, { plantilla }, restaurantId);
+				return Astro.redirect(savedRedirect(`/app/menus/${pathId}`));
+			}
+
+			if (action === "theme") {
+				const mode = (
+					String(form.get("mode") ?? "light") === "dark" ? "dark" : "light"
+				) as ThemeMode;
+				const radiusRaw = String(form.get("radius") ?? "md");
+				const radius = (
+					["none", "sm", "md", "lg"].includes(radiusRaw) ? radiusRaw : "md"
+				) as ThemeRadius;
+
+				const hexColor = (name: string, fallback: string): string => {
+					const value = String(form.get(name) ?? "").trim();
+					return /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+				};
+
+				const themePayload = {
+					mode,
+					primary: hexColor("primary", DEFAULT_RESTAURANT_THEME.primary),
+					background: hexColor("background", DEFAULT_RESTAURANT_THEME.background),
+					foreground: hexColor("foreground", DEFAULT_RESTAURANT_THEME.foreground),
+					muted: hexColor("muted", DEFAULT_RESTAURANT_THEME.muted),
+					border: hexColor("border", DEFAULT_RESTAURANT_THEME.border),
+					radius,
+					fontDisplay: String(form.get("fontDisplay") ?? "system-sans"),
+					fontBody: String(form.get("fontBody") ?? "system-sans"),
+				};
+
+				await updateRestauranteViaApi(restaurantId, { theme: themePayload });
+				await refreshOwnerSnapshot(Astro.cookies, owner, { theme: themePayload });
+				return Astro.redirect(savedRedirect(`/app/menus/${pathId}`));
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo guardar";
+		}
+	}
+}
+
+const restaurant = await loadOwnerRestaurant(owner, {
+	fromSession: true,
+	cookies: Astro.cookies,
+});
+const theme = parseRestaurantTheme(restaurant.entry?.data.theme);
+const currentPlantilla = resolveMenuTemplateId(menuEntry.data.plantilla);
+
+const [{ entries: productosRaw }, { entries: allMenus }, { entries: categorias }] =
+	await Promise.all([
+		listProductosForRestaurant(restaurantId),
+		listMenusForRestaurant(restaurantId),
+		listCategoriasForRestaurant(restaurantId),
+	]);
+
+const catNameById = new Map(categorias.map((c) => [c.data.id, c.data.nombre]));
+const productos = [...productosRaw].sort((a, b) =>
+	(a.data.nombre ?? "").localeCompare(b.data.nombre ?? "", "es"),
+);
+const assignedCount = productos.filter((p) => parseIdList(p.data.menus).includes(menuId)).length;
+
+const priceFmt = new Intl.NumberFormat("es-AR", {
+	style: "currency",
+	currency: "ARS",
+	maximumFractionDigits: 0,
+});
+
+const colorFields = [
+	{ name: "primary", label: "Primario", value: theme.primary },
+	{ name: "background", label: "Fondo", value: theme.background },
+	{ name: "foreground", label: "Texto", value: theme.foreground },
+	{ name: "muted", label: "Texto suave", value: theme.muted },
+	{ name: "border", label: "Bordes", value: theme.border },
+] as const;
+---
+
+<Dashboard
+	title={`DigiMenu — ${menuEntry.data.nombre}`}
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-3xl flex-col gap-6">
+		<div>
+			<p class="mb-1 text-sm">
+				<a href="/app/menus" class="text-muted-foreground hover:text-foreground">← Menús</a>
+			</p>
+			<h1 class="text-2xl font-semibold tracking-tight">{menuEntry.data.nombre}</h1>
+			{
+				menuEntry.data.descripcion && (
+					<p class="text-muted-foreground">{menuEntry.data.descripcion}</p>
+				)
+			}
+			{
+				allMenus.length > 1 && (
+					<nav class="mt-3 flex flex-wrap gap-2 text-sm" aria-label="Otras cartas">
+						{allMenus.map((m) => {
+							const id = menuPathId(m);
+							const active = id === pathId;
+							return (
+								<a
+									href={`/app/menus/${id}${tab === "productos" ? "?tab=productos" : ""}`}
+									class:list={[
+										"rounded-md border px-2 py-1",
+										active
+											? "border-primary text-primary"
+											: "border-border text-muted-foreground hover:text-foreground",
+									]}
+								>
+									{m.data.nombre}
+								</a>
+							);
+						})}
+					</nav>
+				)
+			}
+		</div>
+
+		<nav
+			class="flex gap-1 rounded-lg border border-border p-1"
+			aria-label="Secciones del menú"
+		>
+			<a
+				href={`/app/menus/${pathId}`}
+				class:list={[
+					"flex-1 rounded-md px-3 py-2 text-center text-sm font-medium transition-colors",
+					tab === "estilo"
+						? "bg-primary text-primary-foreground"
+						: "text-muted-foreground hover:text-foreground",
+				]}
+				aria-current={tab === "estilo" ? "page" : undefined}
+			>
+				Estilo
+			</a>
+			<a
+				href={`/app/menus/${pathId}?tab=productos`}
+				class:list={[
+					"flex-1 rounded-md px-3 py-2 text-center text-sm font-medium transition-colors",
+					tab === "productos"
+						? "bg-primary text-primary-foreground"
+						: "text-muted-foreground hover:text-foreground",
+				]}
+				aria-current={tab === "productos" ? "page" : undefined}
+			>
+				Lista de productos
+			</a>
+		</nav>
+
+		{saved && <p class="text-sm text-success">Guardado.</p>}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		{
+			tab === "estilo" ? (
+				<div class="flex flex-col gap-6">
+					<Card>
+						<CardHeader>
+							<CardTitle>Plantilla</CardTitle>
+							<CardDescription>Cómo se organiza el menú público para esta carta.</CardDescription>
+						</CardHeader>
+						<CardContent>
+							<form method="POST" class="flex flex-col gap-4" data-astro-reload>
+								<input type="hidden" name="action" value="plantilla" />
+								<select
+									name="plantilla"
+									class="border-input bg-background h-11 rounded-md border px-3 text-sm"
+									disabled={!canWrite}
+								>
+									{templates.map((t) => (
+										<option value={t.id} selected={currentPlantilla === t.id}>
+											{t.label} — {t.description}
+										</option>
+									))}
+								</select>
+								<div>
+									<Button type="submit" variant="primary" disabled={!canWrite}>
+										Guardar plantilla
+									</Button>
+								</div>
+							</form>
+						</CardContent>
+					</Card>
+
+					<Card>
+						<CardHeader>
+							<CardTitle>Tema del restaurante</CardTitle>
+							<CardDescription>
+								Colores y tipografías en <code>/m/{restaurant.slug}</code>.
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							<form method="POST" class="flex flex-col gap-5" data-astro-reload>
+								<input type="hidden" name="action" value="theme" />
+								<fieldset class="flex flex-col gap-2">
+									<Label>Modo base</Label>
+									<div class="flex gap-4">
+										<label class="flex items-center gap-2 text-sm">
+											<input
+												type="radio"
+												name="mode"
+												value="light"
+												checked={theme.mode === "light"}
+												disabled={!canWrite}
+											/>
+											Claro
+										</label>
+										<label class="flex items-center gap-2 text-sm">
+											<input
+												type="radio"
+												name="mode"
+												value="dark"
+												checked={theme.mode === "dark"}
+												disabled={!canWrite}
+											/>
+											Oscuro
+										</label>
+									</div>
+								</fieldset>
+
+								<div class="grid gap-4 sm:grid-cols-2">
+									{colorFields.map((field) => (
+										<div class="flex flex-col gap-1.5">
+											<Label for={field.name}>{field.label}</Label>
+											<div class="flex items-center gap-2" data-color-field={field.name}>
+												<input
+													type="color"
+													data-swatch
+													value={field.value}
+													class="size-10 cursor-pointer rounded border border-border bg-transparent p-0.5"
+													disabled={!canWrite}
+												/>
+												<Input
+													id={field.name}
+													name={field.name}
+													data-hex
+													value={field.value}
+													disabled={!canWrite}
+												/>
+											</div>
+										</div>
+									))}
+								</div>
+
+								<div class="grid gap-4 sm:grid-cols-2">
+									<div class="flex flex-col gap-1.5">
+										<Label for="fontDisplay">Tipografía títulos</Label>
+										<select
+											id="fontDisplay"
+											name="fontDisplay"
+											class="border-input bg-background h-11 rounded-md border px-3 text-sm"
+											disabled={!canWrite}
+										>
+											{FONT_OPTIONS.map((f) => (
+												<option value={f.id} selected={theme.fontDisplay === f.id}>
+													{f.label}
+												</option>
+											))}
+										</select>
+									</div>
+									<div class="flex flex-col gap-1.5">
+										<Label for="fontBody">Tipografía cuerpo</Label>
+										<select
+											id="fontBody"
+											name="fontBody"
+											class="border-input bg-background h-11 rounded-md border px-3 text-sm"
+											disabled={!canWrite}
+										>
+											{FONT_OPTIONS.map((f) => (
+												<option value={f.id} selected={theme.fontBody === f.id}>
+													{f.label}
+												</option>
+											))}
+										</select>
+									</div>
+								</div>
+
+								<fieldset class="flex flex-col gap-2">
+									<Label>Redondeo</Label>
+									<div class="flex flex-wrap gap-3">
+										{(["none", "sm", "md", "lg"] as const).map((r) => (
+											<label class="flex items-center gap-2 text-sm">
+												<input
+													type="radio"
+													name="radius"
+													value={r}
+													checked={theme.radius === r}
+													disabled={!canWrite}
+												/>
+												{r}
+											</label>
+										))}
+									</div>
+								</fieldset>
+
+								<div>
+									<Button type="submit" variant="primary" disabled={!canWrite}>
+										Guardar estilos
+									</Button>
+								</div>
+							</form>
+						</CardContent>
+					</Card>
+				</div>
+			) : (
+				<div
+					class="flex flex-col gap-4"
+					data-menu-productos
+					data-can-write={canWrite ? "true" : "false"}
+					data-assigned-count={String(assignedCount)}
+				>
+					<p class="text-sm text-muted-foreground">
+						Marcá los productos de esta carta.
+						<span data-assigned-label>
+							{" "}
+							{assignedCount} de {productos.length} asignados.
+						</span>
+					</p>
+
+					<div class="flex w-full flex-wrap items-center justify-between gap-4">
+						<div class="relative w-full max-w-sm">
+							<SearchIcon
+								class="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+								aria-hidden="true"
+							/>
+							<Input
+								type="search"
+								placeholder="Buscar producto"
+								class="w-full pl-9"
+								data-menu-productos-search
+								autocomplete="off"
+							/>
+						</div>
+						<div class="flex gap-2">
+							<Dropdown data-categoria-filter>
+								<DropdownTrigger asChild>
+									<Button variant="outline" data-categoria-filter-trigger>
+										<FilterIcon class="size-4" aria-hidden="true" />
+										<span data-categoria-filter-label>Filtrar categorías</span>
+									</Button>
+								</DropdownTrigger>
+								<DropdownContent align="end" class="max-h-72 overflow-y-auto">
+									<div class="bg-popover sticky top-0 z-10 -mx-1 -mt-1 mb-1 border-b border-border p-2">
+										<Input
+											type="search"
+											size="sm"
+											placeholder="Buscar categoría"
+											class="w-full"
+											data-categoria-filter-search
+											autocomplete="off"
+										/>
+										<button
+											type="button"
+											data-categoria-filter-clear
+											hidden
+											class="text-muted-foreground hover:bg-accent hover:text-accent-foreground mt-1.5 w-full rounded-sm px-2 py-1.5 text-left text-sm"
+										>
+											Limpiar filtro
+										</button>
+									</div>
+									<DropdownCheckboxItem
+										data-menu-cat-filter
+										data-categoria-id=""
+										closeOnClick={false}
+									>
+										Sin categoría
+									</DropdownCheckboxItem>
+									{categorias.map((c) => (
+										<DropdownCheckboxItem
+											data-menu-cat-filter
+											data-categoria-id={c.data.id}
+											closeOnClick={false}
+										>
+											{c.data.nombre}
+										</DropdownCheckboxItem>
+									))}
+									<p
+										data-categoria-filter-empty
+										hidden
+										class="text-muted-foreground py-4 text-center text-sm"
+									>
+										Ninguna categoría coincide.
+									</p>
+								</DropdownContent>
+							</Dropdown>
+							<Select defaultValue="20" data-page-size>
+								<SelectTrigger>
+									<SelectValue placeholder="Mostrar 20 productos" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="10">Mostrar 10 productos</SelectItem>
+									<SelectItem value="20">Mostrar 20 productos</SelectItem>
+									<SelectItem value="50">Mostrar 50 productos</SelectItem>
+									<SelectItem value="100">Mostrar 100 productos</SelectItem>
+									<SelectItem value="all">Mostrar todos los productos</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+					</div>
+
+					{productos.length === 0 ? (
+						<p class="text-sm text-muted-foreground">Todavía no hay productos en el catálogo.</p>
+					) : (
+						<>
+							<ul
+								class="divide-y divide-border rounded-lg border border-border"
+								data-menu-productos-list
+							>
+								{productos.map((p, i) => {
+									const assigned = parseIdList(p.data.menus).includes(menuId);
+									const catId = p.data.categoria ?? "";
+									const catLabel = catId
+										? (catNameById.get(catId) ?? "Sin categoría")
+										: "Sin categoría";
+									return (
+										<li
+											class="flex items-center gap-3 px-3 py-2.5"
+											data-menu-producto-row
+											data-nombre={p.data.nombre}
+											data-categoria-id={catId}
+											data-sort-index={String(i)}
+										>
+											<label class="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+												<input
+													type="checkbox"
+													class="size-4 shrink-0 accent-primary"
+													checked={assigned}
+													disabled={!canWrite}
+													data-menu-assign
+													data-product-id={p.data.id}
+												/>
+												<span class="min-w-0">
+													<span class="block truncate text-sm font-medium">
+														{p.data.nombre}
+													</span>
+													<span class="text-muted-foreground block truncate text-xs">
+														{catLabel} · {priceFmt.format(p.data.precio)}
+													</span>
+												</span>
+											</label>
+										</li>
+									);
+								})}
+							</ul>
+							<p
+								data-menu-productos-empty
+								hidden
+								class="text-muted-foreground py-6 text-center text-sm"
+							>
+								Ningún producto coincide con la búsqueda.
+							</p>
+							<div
+								class="flex flex-wrap items-center justify-between gap-3"
+								data-menu-productos-pager
+							>
+								<p class="text-muted-foreground text-sm" data-pager-label>
+									Mostrando 0–0 de 0
+								</p>
+								<div class="flex gap-2">
+									<Button type="button" variant="outline" size="sm" data-page-prev disabled>
+										Anterior
+									</Button>
+									<Button type="button" variant="outline" size="sm" data-page-next disabled>
+										Siguiente
+									</Button>
+								</div>
+							</div>
+						</>
+					)}
+
+					<p
+						data-menu-productos-toast
+						hidden
+						class="text-sm text-error"
+						role="status"
+					></p>
+				</div>
+			)
+		}
+	</div>
+</Dashboard>
+
+<script>
+	function bindColorFields() {
+		document.querySelectorAll("[data-color-field]").forEach((wrap) => {
+			const el = wrap as HTMLElement;
+			const swatch = el.querySelector("[data-swatch]") as HTMLInputElement | null;
+			const hex = el.querySelector("[data-hex]") as HTMLInputElement | null;
+			if (!swatch || !hex || el.dataset.bound === "1") return;
+			el.dataset.bound = "1";
+			swatch.addEventListener("input", () => {
+				hex.value = swatch.value;
+			});
+			hex.addEventListener("change", () => {
+				if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) swatch.value = hex.value;
+			});
+		});
+	}
+	bindColorFields();
+	document.addEventListener("astro:page-load", bindColorFields);
+</script>
+
+{
+	tab === "productos" && (
+		<script>
+			import type { SelectChangeEvent } from "@/components/starwind/select";
+
+			type PageSize = 10 | 20 | 50 | 100 | "all";
+
+			function foldSearchText(value: string): string {
+				return value
+					.trim()
+					.toLowerCase()
+					.normalize("NFD")
+					.replace(/[\u0300-\u036f]/g, "");
+			}
+
+			function parsePageSize(raw: string): PageSize | null {
+				if (raw === "all") return "all";
+				const n = Number(raw);
+				if (n === 10 || n === 20 || n === 50 || n === 100) return n;
+				return null;
+			}
+
+			function initMenuProductos() {
+				const rootEl = document.querySelector("[data-menu-productos]");
+				if (!(rootEl instanceof HTMLElement) || rootEl.dataset.bound === "1") return;
+				rootEl.dataset.bound = "1";
+
+				const canWrite = rootEl.dataset.canWrite === "true";
+				const searchInput = rootEl.querySelector<HTMLInputElement>("[data-menu-productos-search]");
+				const list = rootEl.querySelector<HTMLElement>("[data-menu-productos-list]");
+				const emptyEl = rootEl.querySelector<HTMLElement>("[data-menu-productos-empty]");
+				const pager = rootEl.querySelector<HTMLElement>("[data-menu-productos-pager]");
+				const pagerLabel = rootEl.querySelector<HTMLElement>("[data-pager-label]");
+				const pagePrevBtn = rootEl.querySelector<HTMLButtonElement>("[data-page-prev]");
+				const pageNextBtn = rootEl.querySelector<HTMLButtonElement>("[data-page-next]");
+				const pageSizeSelect = rootEl.querySelector<HTMLElement>("[data-page-size]");
+				const assignedLabel = rootEl.querySelector<HTMLElement>("[data-assigned-label]");
+				const toast = rootEl.querySelector<HTMLElement>("[data-menu-productos-toast]");
+				const categoriaFilter = rootEl.querySelector<HTMLElement>("[data-categoria-filter]");
+				const categoriaFilterTrigger = rootEl.querySelector<HTMLElement>(
+					"[data-categoria-filter-trigger]",
+				);
+				const categoriaFilterLabel = rootEl.querySelector<HTMLElement>(
+					"[data-categoria-filter-label]",
+				);
+				const categoriaFilterContent = categoriaFilter?.querySelector<HTMLElement>(
+					'[data-slot="dropdown-content"]',
+				);
+				const categoriaFilterSearch = categoriaFilterContent?.querySelector<HTMLInputElement>(
+					"[data-categoria-filter-search]",
+				);
+				const categoriaFilterClear = categoriaFilterContent?.querySelector<HTMLButtonElement>(
+					"[data-categoria-filter-clear]",
+				);
+				const categoriaFilterEmpty = categoriaFilterContent?.querySelector<HTMLElement>(
+					"[data-categoria-filter-empty]",
+				);
+
+				let searchQuery = "";
+				let selectedCategorias: string[] = [];
+				let pageSize: PageSize = 20;
+				let currentPage = 1;
+
+				function rows(): HTMLElement[] {
+					return Array.from(rootEl.querySelectorAll<HTMLElement>("[data-menu-producto-row]"));
+				}
+
+				function updateAssignedLabel() {
+					if (!assignedLabel) return;
+					const total = rows().length;
+					const assigned = rows().filter(
+						(row) => row.querySelector<HTMLInputElement>("[data-menu-assign]")?.checked,
+					).length;
+					assignedLabel.textContent = ` ${assigned} de ${total} asignados.`;
+					rootEl.dataset.assignedCount = String(assigned);
+				}
+
+				function filterCategoriaOptions() {
+					const query = foldSearchText(categoriaFilterSearch?.value ?? "");
+					const items = categoriaFilterContent?.querySelectorAll<HTMLElement>(
+						"[data-menu-cat-filter]",
+					);
+					let visible = 0;
+					items?.forEach((item) => {
+						const label = foldSearchText(item.textContent ?? "");
+						const match = !query || label.includes(query);
+						item.hidden = !match;
+						if (match) visible += 1;
+					});
+					if (categoriaFilterEmpty) {
+						categoriaFilterEmpty.hidden = !(query && visible === 0);
+					}
+				}
+
+				function syncCategoriaCheckboxUi() {
+					const selected = new Set(selectedCategorias);
+					categoriaFilterContent
+						?.querySelectorAll<HTMLElement>("[data-menu-cat-filter]")
+						.forEach((item) => {
+							const id = item.getAttribute("data-categoria-id");
+							if (id === null) return;
+							item.setAttribute("aria-checked", selected.has(id) ? "true" : "false");
+						});
+				}
+
+				function updateCategoriaFilterLabel() {
+					const n = selectedCategorias.length;
+					if (categoriaFilterLabel) {
+						categoriaFilterLabel.textContent =
+							n > 0 ? `Filtrando categorías (${n})` : "Filtrar categorías";
+					}
+					if (categoriaFilterClear) {
+						categoriaFilterClear.hidden = n === 0;
+					}
+				}
+
+				function updatePagerUI(from: number, to: number, total: number, hide: boolean) {
+					if (pagerLabel) pagerLabel.textContent = `Mostrando ${from}–${to} de ${total}`;
+					if (pager) pager.hidden = hide;
+					const size = pageSize === "all" ? total : pageSize;
+					const maxPage = size > 0 ? Math.max(1, Math.ceil(total / size)) : 1;
+					if (pagePrevBtn) pagePrevBtn.disabled = currentPage <= 1;
+					if (pageNextBtn) pageNextBtn.disabled = currentPage >= maxPage;
+				}
+
+				function applyListView() {
+					const query = foldSearchText(searchQuery);
+					const all = rows();
+					const matched: HTMLElement[] = [];
+
+					for (const row of all) {
+						const nombre = foldSearchText(row.dataset.nombre ?? "");
+						const catId = row.dataset.categoriaId ?? "";
+						const catOk =
+							selectedCategorias.length === 0 || selectedCategorias.includes(catId);
+						const match = (!query || nombre.includes(query)) && catOk;
+						if (match) matched.push(row);
+						else row.hidden = true;
+					}
+
+					matched.sort(
+						(a, b) => Number(a.dataset.sortIndex ?? 0) - Number(b.dataset.sortIndex ?? 0),
+					);
+					if (list) {
+						for (const row of matched) list.appendChild(row);
+					}
+
+					const total = matched.length;
+					const filtersActive = Boolean(query) || selectedCategorias.length > 0;
+					if (emptyEl) {
+						emptyEl.hidden = !(filtersActive && all.length > 0 && total === 0);
+						emptyEl.textContent =
+							selectedCategorias.length > 0
+								? "Ningún producto coincide con los filtros."
+								: "Ningún producto coincide con la búsqueda.";
+					}
+
+					if (pageSize === "all") {
+						for (const row of matched) row.hidden = false;
+						updatePagerUI(total === 0 ? 0 : 1, total, total, true);
+						return;
+					}
+
+					const size = pageSize;
+					const maxPage = Math.max(1, Math.ceil(total / size) || 1);
+					if (currentPage > maxPage) currentPage = maxPage;
+					if (currentPage < 1) currentPage = 1;
+
+					const start = total === 0 ? 0 : (currentPage - 1) * size;
+					const end = Math.min(start + size, total);
+					matched.forEach((row, i) => {
+						row.hidden = i < start || i >= end;
+					});
+					updatePagerUI(
+						total === 0 ? 0 : start + 1,
+						total === 0 ? 0 : end,
+						total,
+						total <= size,
+					);
+				}
+
+				searchInput?.addEventListener("input", () => {
+					searchQuery = searchInput.value;
+					currentPage = 1;
+					applyListView();
+				});
+
+				pageSizeSelect?.addEventListener("starwind-select:change", ((e: SelectChangeEvent) => {
+					const next = parsePageSize(e.detail.value);
+					if (next === null) return;
+					pageSize = next;
+					currentPage = 1;
+					applyListView();
+				}) as EventListener);
+
+				document.addEventListener("starwind-dropdown-checkbox:change", ((
+					e: CustomEvent<{ checked: boolean }>,
+				) => {
+					if (!rootEl.isConnected) return;
+					const item = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+						"[data-menu-cat-filter]",
+					);
+					if (!item) return;
+					const id = item.getAttribute("data-categoria-id");
+					if (id === null) return;
+					if (e.detail.checked) {
+						if (!selectedCategorias.includes(id)) {
+							selectedCategorias = [...selectedCategorias, id];
+						}
+					} else {
+						selectedCategorias = selectedCategorias.filter((c) => c !== id);
+					}
+					currentPage = 1;
+					updateCategoriaFilterLabel();
+					applyListView();
+				}) as EventListener);
+
+				categoriaFilterSearch?.addEventListener("input", () => filterCategoriaOptions());
+				categoriaFilterClear?.addEventListener("click", () => {
+					selectedCategorias = [];
+					currentPage = 1;
+					if (categoriaFilterSearch) {
+						categoriaFilterSearch.value = "";
+						filterCategoriaOptions();
+					}
+					syncCategoriaCheckboxUi();
+					updateCategoriaFilterLabel();
+					applyListView();
+				});
+
+				pagePrevBtn?.addEventListener("click", () => {
+					currentPage -= 1;
+					applyListView();
+				});
+				pageNextBtn?.addEventListener("click", () => {
+					currentPage += 1;
+					applyListView();
+				});
+
+				rootEl.addEventListener("change", async (event) => {
+					const input = (event.target as HTMLElement | null)?.closest<HTMLInputElement>(
+						"[data-menu-assign]",
+					);
+					if (!input || !canWrite) return;
+					const productId = input.dataset.productId ?? "";
+					const assigned = input.checked;
+					input.disabled = true;
+					if (toast) {
+						toast.hidden = true;
+						toast.textContent = "";
+					}
+					try {
+						const res = await fetch(location.pathname + "?tab=productos", {
+							method: "POST",
+							headers: {
+								"Content-Type": "application/json",
+								Accept: "application/json",
+							},
+							body: JSON.stringify({
+								action: "toggle-product",
+								productId,
+								assigned,
+							}),
+						});
+						const data = (await res.json()) as { ok?: boolean; error?: string };
+						if (!res.ok || !data.ok) {
+							throw new Error(data.error || "No se pudo actualizar");
+						}
+						updateAssignedLabel();
+					} catch (err) {
+						input.checked = !assigned;
+						if (toast) {
+							toast.hidden = false;
+							toast.textContent =
+								err instanceof Error ? err.message : "No se pudo actualizar";
+						}
+					} finally {
+						input.disabled = false;
+					}
+				});
+
+				if (categoriaFilterTrigger && categoriaFilterContent) {
+					const width = Math.max(categoriaFilterTrigger.offsetWidth, 220);
+					categoriaFilterTrigger.style.minWidth = `${width}px`;
+					categoriaFilterContent.style.minWidth = `${width}px`;
+				}
+
+				syncCategoriaCheckboxUi();
+				updateCategoriaFilterLabel();
+				updateAssignedLabel();
+				applyListView();
+			}
+
+			initMenuProductos();
+			document.addEventListener("astro:page-load", initMenuProductos);
+		</script>
+	)
+}

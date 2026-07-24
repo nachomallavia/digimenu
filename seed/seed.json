@@ -32,8 +32,13 @@
 					"type": "text"
 				},
 				{
-					"slug": "logo",
-					"label": "Logo",
+					"slug": "logo_light",
+					"label": "Logo (fondo claro)",
+					"type": "image"
+				},
+				{
+					"slug": "logo_dark",
+					"label": "Logo (fondo oscuro)",
 					"type": "image"
 				},
 				{
@@ -45,6 +50,74 @@
 					"slug": "theme",
 					"label": "Estilos del menú",
 					"type": "json"
+				}
+			]
+		},
+		{
+			"slug": "menus",
+			"label": "Menús",
+			"labelSingular": "Menú",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "nombre",
+					"label": "Nombre",
+					"type": "string",
+					"required": true,
+					"searchable": true
+				},
+				{
+					"slug": "descripcion",
+					"label": "Descripción",
+					"type": "text"
+				},
+				{
+					"slug": "restaurante",
+					"label": "Restaurante",
+					"type": "reference",
+					"required": true,
+					"options": {
+						"collection": "restaurantes"
+					}
+				},
+				{
+					"slug": "orden",
+					"label": "Orden",
+					"type": "number"
+				},
+				{
+					"slug": "plantilla",
+					"label": "Plantilla",
+					"type": "string"
+				}
+			]
+		},
+		{
+			"slug": "tags",
+			"label": "Etiquetas",
+			"labelSingular": "Etiqueta",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "nombre",
+					"label": "Nombre",
+					"type": "string",
+					"required": true,
+					"searchable": true
+				},
+				{
+					"slug": "restaurante",
+					"label": "Restaurante",
+					"type": "reference",
+					"required": true,
+					"options": {
+						"collection": "restaurantes"
+					}
+				},
+				{
+					"slug": "icon",
+					"label": "Icono",
+					"type": "string"
 				}
 			]
 		},
@@ -134,6 +207,16 @@
 					"options": {
 						"collection": "categorias"
 					}
+				},
+				{
+					"slug": "menus",
+					"label": "Menús",
+					"type": "json"
+				},
+				{
+					"slug": "tags",
+					"label": "Etiquetas",
+					"type": "json"
 				}
 			]
 		},
@@ -203,6 +286,21 @@
 				}
 			}
 		],
+		"menus": [
+			{
+				"id": "carta",
+				"slug": "carta",
+				"status": "published",
+				"data": {
+					"nombre": "Carta",
+					"descripcion": "Menú principal",
+					"restaurante": "$ref:finca",
+					"orden": 0,
+					"plantilla": "classic"
+				}
+			}
+		],
+		"tags": [],
 		"categorias": [
 			{
 				"id": "tapeos",
@@ -255,7 +353,9 @@
 					"descripcion": "Pate cremoso de hongos Girgola, acompañado de crutons de pan ciabatta con pesto y queso gouda gratinado",
 					"precio": 18000,
 					"restaurante": "$ref:finca",
-					"categoria": "$ref:tapeos"
+					"categoria": "$ref:tapeos",
+					"menus": ["carta"],
+					"tags": []
 				}
 			},
 			{
@@ -267,7 +367,9 @@
 					"descripcion": "Colchón de tomates confitados, burrata, pesto de albahaca. Reducción de dulce de rosa mosqueta y naranja, acompañado de crutons gratinados con queso gouda",
 					"precio": 20000,
 					"restaurante": "$ref:finca",
-					"categoria": "$ref:tapeos"
+					"categoria": "$ref:tapeos",
+					"menus": ["carta"],
+					"tags": []
 				}
 			},
 			{
@@ -278,7 +380,9 @@
 					"nombre": "Coca-Cola / Coca Zero",
 					"precio": 4500,
 					"restaurante": "$ref:finca",
-					"categoria": "$ref:sin-alcohol"
+					"categoria": "$ref:sin-alcohol",
+					"menus": ["carta"],
+					"tags": []
 				}
 			},
 			{
@@ -289,7 +393,9 @@
 					"nombre": "Espresso",
 					"precio": 4000,
 					"restaurante": "$ref:finca",
-					"categoria": "$ref:cafe-solo"
+					"categoria": "$ref:cafe-solo",
+					"menus": ["carta"],
+					"tags": []
 				}
 			},
 			{
@@ -301,7 +407,9 @@
 					"descripcion": "Espresso con leche finamente texturizada que realza el sabor (160ml)",
 					"precio": 7000,
 					"restaurante": "$ref:finca",
-					"categoria": "$ref:cafe-espresso-leche"
+					"categoria": "$ref:cafe-espresso-leche",
+					"menus": ["carta"],
+					"tags": []
 				}
 			}
 		],

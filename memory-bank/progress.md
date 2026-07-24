@@ -1,29 +1,27 @@
 # Progress
 
 ## Done
-- DigiMenu schema + public `/m/[slug]` menu (layout + theme aware, 3 queries, agrupado en memoria)
+- DigiMenu schema + public `/m/[slug]` menu (layout + theme aware)
+- **Menús + tags foundation (2026-07-23):** collections `menus`/`tags`; `productos.menus`/`tags` JSON; Classic template + registry; owner IA (Menús→Estilo/Lista, Etiquetas); migrate script local; Worker schema + Carta created
 - Supabase digimenu-db: table `owner_restaurants` + RLS
 - Owner app: auth + dashboard shell (Starwind sidebar; View Transitions disabled)
-- Owner sections: info, menu type, estilos, categorías, productos (+ detalle)
-- Owner lists: SSR live collections + Worker list cache (`owner-list-cache.ts`); no client SWR / no `/app/api/*` JSON BFF
-- DigiMenu owner session cookie (`digimenu_owner`, 3d TTL, HMAC) — sin revalidación post-mutación (`refreshOwnerSnapshot` desde payload)
-- Docs: `docs/owner-auth.md`, `docs/owner-dashboard.md`, `.env.example`
-- **Categorías como colección `categorias`** (nombre, restaurante ref, icon, cover, orden) + `productos.categoria` — local y Worker migrados (2026-07-17), taxonomía y `category_meta` eliminados
-- Owner media uploads: product `imagen`, restaurant `logo`, `categorias.cover` via EmDash multipart API
-- Category icon picker (Tabler, `src/lib/category-icons.ts`) + cover en `/app/categorias`; public menu renders both
-- Demo stock photos 4:5 on all 86 products + 15 category covers (local + Worker); menu CSS 4:5
-- Quick wins seguridad: open redirect `//`, logout POST-only, hex validation en estilos, `primary-foreground` fix
-- Scripts: `scripts/migrate-categorias.mjs` (migración local re-ejecutable con `--cleanup`)
+- Owner lists: SSR live collections + Worker list cache
+- DigiMenu owner session cookie `digimenu_owner`
+- Docs: `docs/owner-auth.md`, `docs/owner-dashboard.md`
+- Categorías colección + productos.categoria
+- Owner media uploads + dual logos (local)
+- CSV productos import/export
 
 ## Next
-- OAuth / onboarding track
-- UI de reordenamiento de categorías (campo `orden` listo)
+- `npm run deploy` + verify Worker `/m/finca` with menus collection
+- Multi-plantilla gallery + theme override por menú
+- Multi-select menús/tags en ficha producto
+- OAuth / onboarding
+- UI reordenamiento categorías
 
 ## Known issues
 - Production D1 is not re-seeded on deploy — align via MCP/admin (`memory-bank/worker-align.md`)
-- Local MCP EmDash may need reconnect after restarting `emdash dev`
-- After DB wipe, also clear `.wrangler/state/v3/kv` for seed/setup
+- Worker Carta may need publish if left as draft; productos.menus empty uses sole-menu fallback
 - Without `EMDASH_API_TOKEN`, owner forms are read-oriented
 - Worker `productos.descripcion` is currently required (local seed: optional)
-- Local `.env` PAT ≠ Worker PAT; Worker media scripting uses R2 `wrangler` + MCP `media_create`
-- Borrar una categoría deja `productos.categoria` colgante → se muestran como "Sin categoría" (sin cascada, decisión deliberada)
+- Borrar categoría deja `productos.categoria` colgante → "Sin categoría"

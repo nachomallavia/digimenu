@@ -2,6 +2,8 @@
 import { getEmDashCollection, getSiteSettings } from "emdash";
 import { Image } from "emdash/ui";
 import Menu from "../layouts/Menu.astro";
+import { restaurantLogoForMode } from "../lib/restaurant-logo";
+import { parseRestaurantTheme } from "../lib/restaurant-theme";
 import { resolveStarterSiteIdentity } from "../utils/site-identity";
 
 const { entries: restaurantes, cacheHint } = await getEmDashCollection("restaurantes", {
@@ -24,15 +26,21 @@ if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 			</p>
 		) : (
 			<ul class="restaurant-list">
-				{restaurantes.map((r) => (
-					<li>
-						<a href={`/m/${r.id}`}>
-							{r.data.logo && <Image image={r.data.logo} />}
-							<span>{r.data.nombre}</span>
-						</a>
-						{r.data.descripcion && <p>{r.data.descripcion}</p>}
-					</li>
-				))}
+				{restaurantes.map((r) => {
+					const theme = parseRestaurantTheme(
+						(r.data as { theme?: unknown }).theme,
+					);
+					const logo = restaurantLogoForMode(r.data, theme.mode);
+					return (
+						<li>
+							<a href={`/m/${r.id}`}>
+								{logo && <Image image={logo} />}
+								<span>{r.data.nombre}</span>
+							</a>
+							{r.data.descripcion && <p>{r.data.descripcion}</p>}
+						</li>
+					);
+				})}
 			</ul>
 		)
 	}

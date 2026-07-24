@@ -4,7 +4,7 @@
  * Uses Cache API on Workers; in-memory Map when Cache API is unavailable (local).
  */
 
-export type OwnerListKind = "productos" | "categorias";
+export type OwnerListKind = "productos" | "categorias" | "menus" | "tags";
 
 const CACHE_NAME = "digimenu-owner-lists";
 const MAX_AGE_SEC = 300;
@@ -124,7 +124,8 @@ export async function bustOwnerListCache(
 	restaurantId: string,
 	kind: OwnerListKind | "both" = "both",
 ): Promise<void> {
-	const kinds: OwnerListKind[] = kind === "both" ? ["productos", "categorias"] : [kind];
+	const kinds: OwnerListKind[] =
+		kind === "both" ? ["productos", "categorias", "menus", "tags"] : [kind];
 	const cache = await openCache();
 
 	for (const k of kinds) {

@@ -163,8 +163,15 @@
           "unique": false
         },
         {
-          "slug": "logo",
-          "label": "Logo",
+          "slug": "logo_light",
+          "label": "Logo (fondo claro)",
+          "type": "image",
+          "required": false,
+          "unique": false
+        },
+        {
+          "slug": "logo_dark",
+          "label": "Logo (fondo oscuro)",
           "type": "image",
           "required": false,
           "unique": false

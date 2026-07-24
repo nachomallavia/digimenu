@@ -4,11 +4,18 @@ import {
 	getEmDashCollection,
 	getEmDashEntry,
 } from "emdash";
-import { Image } from "emdash/ui";
-import CategoryIcon from "../../components/CategoryIcon.astro";
+import Classic from "../../components/menu-templates/Classic.astro";
 import Menu from "../../layouts/Menu.astro";
-import { imageSrc, type EmDashCategoria } from "../../lib/emdash/client";
+import type {
+	EmDashCategoria,
+	EmDashMenu,
+	EmDashProducto,
+	EmDashRestaurante,
+	EmDashTag,
+} from "../../lib/emdash/client";
 import { parseMenuLayout } from "../../lib/menu-layout";
+import { parseIdList, productBelongsToMenu } from "../../lib/menu-templates/ids";
+import { DEFAULT_MENU_TEMPLATE_ID } from "../../lib/menu-templates/registry";
 import { parseRestaurantTheme } from "../../lib/restaurant-theme";
 
 const { slug } = Astro.params;
@@ -16,15 +23,18 @@ if (!slug) {
 	return Astro.rewrite("/404");
 }
 
-const { entry: restaurante, cacheHint: restaurantHint } = await getEmDashEntry(
+const { entry: restauranteRaw, cacheHint: restaurantHint } = await getEmDashEntry(
 	"restaurantes",
 	slug,
 );
 
-if (!restaurante) {
+if (!restauranteRaw) {
 	return Astro.rewrite("/404");
 }
 
+const restaurante = restauranteRaw as unknown as EmDashRestaurante & {
+	edit?: Record<string, Record<string, unknown>>;
+};
 const restaurantId = restaurante.data.id;
 const layout = parseMenuLayout(
 	(restaurante.data as { menu_layout?: unknown }).menu_layout,
@@ -32,8 +42,10 @@ const layout = parseMenuLayout(
 const theme = parseRestaurantTheme((restaurante.data as { theme?: unknown }).theme);
 
 const [
-	{ entries: productosRaw, cacheHint: productsHint },
-	{ entries: categoriasRaw, cacheHint: categoriasHint },
+	productsResult,
+	categoriasResult,
+	menusResult,
+	tagsResult,
 ] = await Promise.all([
 	getEmDashCollection("productos", {
 		where: { restaurante: restaurantId },
@@ -43,7 +55,24 @@ const [
 		where: { restaurante: restaurantId },
 		limit: 100,
 	}),
+	getEmDashCollection("menus", {
+		where: { restaurante: restaurantId },
+		limit: 50,
+	}),
+	getEmDashCollection("tags", {
+		where: { restaurante: restaurantId },
+		limit: 100,
+	}),
 ]);
+
+const productosRaw = productsResult.error ? [] : productsResult.entries;
+const productsHint = productsResult.cacheHint;
+const categoriasRaw = categoriasResult.error ? [] : categoriasResult.entries;
+const categoriasHint = categoriasResult.cacheHint;
+const menusRaw = menusResult.error ? [] : menusResult.entries;
+const menusHint = menusResult.cacheHint;
+const tagsRaw = tagsResult.error ? [] : tagsResult.entries;
+const tagsHint = tagsResult.cacheHint;
 
 const categorias = (categoriasRaw as unknown as EmDashCategoria[])
 	.slice()
@@ -54,15 +83,47 @@ const categorias = (categoriasRaw as unknown as EmDashCategoria[])
 		return (a.data.nombre ?? "").localeCompare(b.data.nombre ?? "");
 	});
 
-// EmDash's collection L2 path always reviveEntry()'s with createNoop(), so
-// `{...item.edit.*}` is inert for list queries even in visual edit mode.
-// Re-attach editable proxies only for authenticated editors with Edit ON.
+const menusListed = (menusRaw as unknown as EmDashMenu[])
+	.slice()
+	.sort((a, b) => {
+		const oa = a.data.orden ?? Number.MAX_SAFE_INTEGER;
+		const ob = b.data.orden ?? Number.MAX_SAFE_INTEGER;
+		if (oa !== ob) return oa - ob;
+		return (a.data.nombre ?? "").localeCompare(b.data.nombre ?? "");
+	});
+
+const tags = tagsRaw as unknown as EmDashTag[];
+
+const syntheticMenu: EmDashMenu = {
+	id: "_default",
+	slug: "carta",
+	status: "published",
+	data: {
+		id: "_default",
+		nombre: "Carta",
+		descripcion: null,
+		restaurante: restaurantId,
+		orden: 0,
+		plantilla: DEFAULT_MENU_TEMPLATE_ID,
+	},
+};
+
+const menus = menusListed.length > 0 ? menusListed : [syntheticMenu];
+
+const menuParam = Astro.url.searchParams.get("menu");
+const activeMenu =
+	(menuParam
+		? menus.find((m) => m.slug === menuParam || m.id === menuParam || m.data.id === menuParam)
+		: undefined) ?? menus[0];
+
+const soleMenuId = menus.length === 1 ? menus[0].data.id : undefined;
+
 const editor = Astro.locals.user;
 const isEditor = !!editor && editor.role >= 30;
 const editMode =
 	isEditor && Astro.cookies.get("emdash-edit-mode")?.value === "true";
 
-const productos = editMode
+const productosAll = editMode
 	? productosRaw.map((entry) => {
 			const data = entry.data as {
 				id: string;
@@ -82,71 +143,25 @@ const productos = editMode
 		})
 	: productosRaw;
 
-type MenuItem = (typeof productos)[number];
-type Section = {
-	slug: string;
-	label: string;
-	items: MenuItem[];
-	icon?: string | null;
-	coverSrc?: string;
-};
+const productos = (productosAll as unknown as EmDashProducto[]).filter((p) =>
+	productBelongsToMenu(p.data.menus, activeMenu.data.id, {
+		treatEmptyAsAll: menusListed.length === 0,
+		soleMenuId,
+	}),
+);
 
-// Group in memory by the `categoria` reference — no extra queries.
-const byCategoryId = new Map<string, MenuItem[]>();
-const uncategorized: MenuItem[] = [];
-
-for (const producto of productos) {
-	const categoriaId = (producto.data as { categoria?: string | null }).categoria;
-	if (!categoriaId) {
-		uncategorized.push(producto);
-		continue;
-	}
-	const list = byCategoryId.get(categoriaId) ?? [];
-	list.push(producto);
-	byCategoryId.set(categoriaId, list);
+const productTagIds = new Map<string, string[]>();
+for (const p of productos) {
+	productTagIds.set(p.data.id, parseIdList(p.data.tags));
 }
-
-const sections: Section[] = [];
-for (const cat of categorias) {
-	const items = byCategoryId.get(cat.data.id);
-	if (items?.length) {
-		sections.push({
-			slug: cat.id,
-			label: cat.data.nombre,
-			items,
-			icon: cat.data.icon,
-			coverSrc: imageSrc(cat.data.cover),
-		});
-		byCategoryId.delete(cat.data.id);
-	}
-}
-// Products pointing at a deleted/foreign categoria fall back here.
-for (const items of byCategoryId.values()) {
-	uncategorized.push(...items);
-}
-if (uncategorized.length) {
-	sections.push({ slug: "sin-categoria", label: "Sin categoría", items: uncategorized });
-}
-
-const flatItems: MenuItem[] =
-	layout.navigation === "scroll_unico"
-		? sections.flatMap((s) => s.items)
-		: [];
-
-const priceFmt = new Intl.NumberFormat("es-AR", {
-	style: "currency",
-	currency: "ARS",
-	maximumFractionDigits: 0,
-});
 
 if (Astro.cache?.enabled) {
 	Astro.cache.set(restaurantHint);
 	Astro.cache.set(productsHint);
 	Astro.cache.set(categoriasHint);
+	if (menusHint) Astro.cache.set(menusHint);
+	if (tagsHint) Astro.cache.set(tagsHint);
 }
-
-const listClass =
-	layout.columns === 2 ? "menu-list menu-list--cols-2" : "menu-list";
 ---
 
 <Menu
@@ -156,244 +171,15 @@ const listClass =
 	restaurantSlug={restaurante.id}
 	theme={theme}
 >
-	<article class="menu">
-		<header class="menu-header">
-			{
-				restaurante.data.logo && (
-					<div {...restaurante.edit.logo}>
-						<Image image={restaurante.data.logo} class="menu-logo" />
-					</div>
-				)
-			}
-			<h1 {...restaurante.edit.nombre}>{restaurante.data.nombre}</h1>
-			{
-				restaurante.data.descripcion && (
-					<p class="menu-desc" {...restaurante.edit.descripcion}>
-						{restaurante.data.descripcion}
-					</p>
-				)
-			}
-			{
-				layout.navigation === "por_categorias" && sections.length > 1 && (
-					<nav class="menu-toc" aria-label="Categorías">
-						{sections.map((section) => (
-							<a href={`#${section.slug}`} class="menu-toc-link">
-								{section.icon && (
-									<CategoryIcon icon={section.icon} class="menu-toc-icon" />
-								)}
-								{section.label}
-							</a>
-						))}
-					</nav>
-				)
-			}
-		</header>
-
-		{
-			productos.length === 0 ? (
-				<p>Todavía no hay productos en este menú.</p>
-			) : layout.navigation === "scroll_unico" ? (
-				<ul class={listClass}>
-					{flatItems.map((item) => (
-						<li class="menu-item">
-							{layout.showImages && item.data.imagen && (
-								<div {...item.edit.imagen}>
-									<Image image={item.data.imagen} class="menu-item-image" />
-								</div>
-							)}
-							<div class="menu-item-body">
-								<div class="menu-item-row">
-									<h3 {...item.edit.nombre}>{item.data.nombre}</h3>
-									<span class="menu-price" {...item.edit.precio}>
-										{priceFmt.format(item.data.precio)}
-									</span>
-								</div>
-								{item.data.descripcion && (
-									<p {...item.edit.descripcion}>{item.data.descripcion}</p>
-								)}
-							</div>
-						</li>
-					))}
-				</ul>
-			) : (
-				sections.map((section) => {
-					return (
-						<section class="menu-section" id={section.slug}>
-							{section.coverSrc && (
-								<div class="menu-section-cover">
-									<img
-										src={section.coverSrc}
-										alt=""
-										class="menu-section-cover-img"
-									/>
-								</div>
-							)}
-							<h2 class="menu-section-title">
-								{section.icon && (
-									<CategoryIcon icon={section.icon} class="menu-section-icon" />
-								)}
-								<span>{section.label}</span>
-							</h2>
-							<ul class={listClass}>
-								{section.items.map((item) => (
-									<li class="menu-item">
-										{layout.showImages && item.data.imagen && (
-											<div {...item.edit.imagen}>
-												<Image image={item.data.imagen} class="menu-item-image" />
-											</div>
-										)}
-										<div class="menu-item-body">
-											<div class="menu-item-row">
-												<h3 {...item.edit.nombre}>{item.data.nombre}</h3>
-												<span class="menu-price" {...item.edit.precio}>
-													{priceFmt.format(item.data.precio)}
-												</span>
-											</div>
-											{item.data.descripcion && (
-												<p {...item.edit.descripcion}>{item.data.descripcion}</p>
-											)}
-										</div>
-									</li>
-								))}
-							</ul>
-						</section>
-					);
-				})
-			)
-		}
-	</article>
+	<Classic
+		restaurant={restaurante}
+		menus={menus}
+		activeMenu={activeMenu}
+		categories={categorias}
+		products={productos}
+		tags={tags}
+		productTagIds={productTagIds}
+		theme={theme}
+		layout={layout}
+	/>
 </Menu>
-
-<style>
-	.menu {
-		max-width: 40rem;
-		margin: 0 auto;
-		padding: 1.5rem 1rem 3rem;
-	}
-	.menu:has(.menu-list--cols-2) {
-		max-width: 56rem;
-	}
-	.menu-header {
-		margin-bottom: 2rem;
-	}
-	.menu-logo {
-		max-height: 4rem;
-		width: auto;
-		margin-bottom: 0.75rem;
-		border-radius: var(--radius, 0.625rem);
-	}
-	.menu-desc {
-		opacity: 0.8;
-	}
-	.menu-toc {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem 1rem;
-		margin-top: 1rem;
-		font-size: 0.875rem;
-	}
-	.menu-toc-link {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		color: var(--primary, currentColor);
-		text-decoration: none;
-	}
-	.menu-toc-link:hover {
-		text-decoration: underline;
-	}
-	.menu-toc-icon {
-		width: 1rem;
-		height: 1rem;
-		flex-shrink: 0;
-	}
-	.menu-section {
-		margin-bottom: 2rem;
-		scroll-margin-top: 1rem;
-	}
-	.menu-section-cover {
-		margin: 0 0 0.75rem;
-		border-radius: var(--radius, 0.625rem);
-		overflow: hidden;
-		aspect-ratio: 4 / 5;
-		max-width: 12rem;
-		background: color-mix(in oklab, var(--muted, #888) 20%, transparent);
-	}
-	.menu-section-cover-img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		display: block;
-	}
-	.menu-section-title {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 1rem;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		border-bottom: 1px solid var(--border, currentColor);
-		padding-bottom: 0.35rem;
-		margin-bottom: 1rem;
-	}
-	.menu-section-icon {
-		width: 1.15rem;
-		height: 1.15rem;
-		flex-shrink: 0;
-	}
-	.menu-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-	.menu-list--cols-2 {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: 1rem;
-	}
-	@media (min-width: 640px) {
-		.menu-list--cols-2 {
-			grid-template-columns: 1fr 1fr;
-		}
-	}
-	.menu-item {
-		display: flex;
-		gap: 0.75rem;
-		align-items: flex-start;
-	}
-	.menu-item-image {
-		width: 4.5rem;
-		aspect-ratio: 4 / 5;
-		height: auto;
-		object-fit: cover;
-		flex-shrink: 0;
-		border-radius: var(--radius, 0.625rem);
-	}
-	.menu-item-body {
-		flex: 1;
-		min-width: 0;
-	}
-	.menu-item-row {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		align-items: baseline;
-	}
-	.menu-item-row h3 {
-		margin: 0;
-		font-size: 1.05rem;
-	}
-	.menu-price {
-		white-space: nowrap;
-		font-variant-numeric: tabular-nums;
-		color: var(--primary, inherit);
-	}
-	.menu-item-body p {
-		margin: 0.25rem 0 0;
-		opacity: 0.75;
-		font-size: 0.95rem;
-	}
-</style>

@@ -1,0 +1,24 @@
+---
+import { requireOwner } from "@/lib/auth/require-owner";
+import { assertMenuBelongsToRestaurant, getMenuBySlug } from "@/lib/emdash/client";
+import { menuPathId } from "@/lib/emdash/owner-menus";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const menuParam = Astro.params.id;
+if (!menuParam) {
+	return Astro.redirect("/app/menus");
+}
+
+const { entry } = await getMenuBySlug(menuParam);
+if (!entry || !assertMenuBelongsToRestaurant(entry, auth.owner.restaurant.emdash_restaurant_id)) {
+	return Astro.redirect("/app/menus");
+}
+
+return Astro.redirect(`/app/menus/${menuPathId(entry)}`);
+---

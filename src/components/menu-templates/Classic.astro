@@ -1,0 +1,418 @@
+---
+/**
+ * Classic public menu template — sections by category, optional images, TOC.
+ */
+import { Image } from "emdash/ui";
+import CategoryIcon from "../CategoryIcon.astro";
+import { imageSrc } from "../../lib/emdash/client";
+import { DEFAULT_MENU_LAYOUT, type MenuLayout } from "../../lib/menu-layout";
+import {
+	restaurantLogoFieldForMode,
+	restaurantLogoForMode,
+} from "../../lib/restaurant-logo";
+import type { MenuTemplateProps, EditableProducto, EditableRestaurante } from "../../lib/menu-templates/types";
+import { parseIdList } from "../../lib/menu-templates/ids";
+
+type Props = MenuTemplateProps;
+
+const {
+	restaurant: restaurantProp,
+	menus,
+	activeMenu,
+	categories: categorias,
+	products: productsProp,
+	tags,
+	productTagIds,
+	theme,
+	layout: layoutProp,
+} = Astro.props;
+
+const restaurante = restaurantProp as EditableRestaurante;
+const productos = productsProp as EditableProducto[];
+
+const layout: MenuLayout = layoutProp ?? DEFAULT_MENU_LAYOUT;
+const menuLogo = restaurantLogoForMode(restaurante.data, theme.mode);
+const menuLogoField = restaurantLogoFieldForMode(restaurante.data, theme.mode);
+
+type MenuItem = (typeof productos)[number];
+type Section = {
+	slug: string;
+	label: string;
+	items: MenuItem[];
+	icon?: string | null;
+	coverSrc?: string;
+};
+
+const byCategoryId = new Map<string, MenuItem[]>();
+const uncategorized: MenuItem[] = [];
+
+for (const producto of productos) {
+	const categoriaId = (producto.data as { categoria?: string | null }).categoria;
+	if (!categoriaId) {
+		uncategorized.push(producto);
+		continue;
+	}
+	const list = byCategoryId.get(categoriaId) ?? [];
+	list.push(producto);
+	byCategoryId.set(categoriaId, list);
+}
+
+const sections: Section[] = [];
+for (const cat of categorias) {
+	const items = byCategoryId.get(cat.data.id);
+	if (items?.length) {
+		sections.push({
+			slug: cat.id,
+			label: cat.data.nombre,
+			items,
+			icon: cat.data.icon,
+			coverSrc: imageSrc(cat.data.cover),
+		});
+		byCategoryId.delete(cat.data.id);
+	}
+}
+for (const items of byCategoryId.values()) {
+	uncategorized.push(...items);
+}
+if (uncategorized.length) {
+	sections.push({ slug: "sin-categoria", label: "Sin categoría", items: uncategorized });
+}
+
+const flatItems: MenuItem[] =
+	layout.navigation === "scroll_unico" ? sections.flatMap((s) => s.items) : [];
+
+const priceFmt = new Intl.NumberFormat("es-AR", {
+	style: "currency",
+	currency: "ARS",
+	maximumFractionDigits: 0,
+});
+
+const listClass = layout.columns === 2 ? "menu-list menu-list--cols-2" : "menu-list";
+const tagById = new Map(tags.map((t) => [t.data.id, t]));
+
+function tagsForProduct(productId: string) {
+	const ids = productTagIds.get(productId) ?? parseIdList(
+		productos.find((p) => p.data.id === productId)?.data.tags,
+	);
+	return ids.map((id) => tagById.get(id)).filter(Boolean);
+}
+---
+
+<article class="menu">
+	<header class="menu-header">
+		{
+				menuLogo && menuLogoField && restaurante.edit?.[menuLogoField] && (
+					<div {...restaurante.edit[menuLogoField]}>
+						{/* @ts-expect-error EmDash Image accepts media refs */}
+						<Image image={menuLogo} class="menu-logo" />
+					</div>
+				)
+		}
+		<h1 {...(restaurante.edit?.nombre ?? {})}>{restaurante.data.nombre}</h1>
+		{
+			restaurante.data.descripcion && (
+				<p class="menu-desc" {...(restaurante.edit?.descripcion ?? {})}>
+					{restaurante.data.descripcion}
+				</p>
+			)
+		}
+		{
+			menus.length > 1 && (
+				<nav class="menu-switcher" aria-label="Menús">
+					{menus.map((m) => {
+						const slug = m.slug ?? m.id;
+						const active = m.data.id === activeMenu.data.id;
+						const href = `?menu=${encodeURIComponent(slug)}`;
+						return (
+							<a
+								href={href}
+								class:list={["menu-switcher-link", active && "is-active"]}
+								aria-current={active ? "page" : undefined}
+							>
+								{m.data.nombre}
+							</a>
+						);
+					})}
+				</nav>
+			)
+		}
+		{
+			layout.navigation === "por_categorias" && sections.length > 1 && (
+				<nav class="menu-toc" aria-label="Categorías">
+					{sections.map((section) => (
+						<a href={`#${section.slug}`} class="menu-toc-link">
+							{section.icon && (
+								<CategoryIcon icon={section.icon} class="menu-toc-icon" />
+							)}
+							{section.label}
+						</a>
+					))}
+				</nav>
+			)
+		}
+	</header>
+
+	{
+		productos.length === 0 ? (
+			<p>Todavía no hay productos en este menú.</p>
+		) : layout.navigation === "scroll_unico" ? (
+			<ul class={listClass}>
+				{flatItems.map((item) => (
+					<li class="menu-item">
+						{layout.showImages && item.data.imagen && (
+							<div {...(item.edit?.imagen ?? {})}>
+								{/* @ts-expect-error EmDash Image accepts media refs */}
+								<Image image={item.data.imagen} class="menu-item-image" />
+							</div>
+						)}
+						<div class="menu-item-body">
+							<div class="menu-item-row">
+								<h3 {...(item.edit?.nombre ?? {})}>{item.data.nombre}</h3>
+								<span class="menu-price" {...(item.edit?.precio ?? {})}>
+									{priceFmt.format(item.data.precio)}
+								</span>
+							</div>
+							{item.data.descripcion && (
+								<p {...(item.edit?.descripcion ?? {})}>{item.data.descripcion}</p>
+							)}
+							{
+								(() => {
+									const productTags = tagsForProduct(item.data.id);
+									return productTags.length > 0 ? (
+										<ul class="menu-item-tags">
+											{productTags.map((t) => (
+												<li class="menu-item-tag">{t!.data.nombre}</li>
+											))}
+										</ul>
+									) : null;
+								})()
+							}
+						</div>
+					</li>
+				))}
+			</ul>
+		) : (
+			sections.map((section) => (
+				<section class="menu-section" id={section.slug}>
+					{section.coverSrc && (
+						<div class="menu-section-cover">
+							<img src={section.coverSrc} alt="" class="menu-section-cover-img" />
+						</div>
+					)}
+					<h2 class="menu-section-title">
+						{section.icon && (
+							<CategoryIcon icon={section.icon} class="menu-section-icon" />
+						)}
+						<span>{section.label}</span>
+					</h2>
+					<ul class={listClass}>
+						{section.items.map((item) => (
+							<li class="menu-item">
+								{layout.showImages && item.data.imagen && (
+									<div {...(item.edit?.imagen ?? {})}>
+										{/* @ts-expect-error EmDash Image accepts media refs */}
+										<Image image={item.data.imagen} class="menu-item-image" />
+									</div>
+								)}
+								<div class="menu-item-body">
+									<div class="menu-item-row">
+										<h3 {...(item.edit?.nombre ?? {})}>{item.data.nombre}</h3>
+										<span class="menu-price" {...(item.edit?.precio ?? {})}>
+											{priceFmt.format(item.data.precio)}
+										</span>
+									</div>
+									{item.data.descripcion && (
+										<p {...(item.edit?.descripcion ?? {})}>{item.data.descripcion}</p>
+									)}
+									{
+										(() => {
+											const productTags = tagsForProduct(item.data.id);
+											return productTags.length > 0 ? (
+												<ul class="menu-item-tags">
+													{productTags.map((t) => (
+														<li class="menu-item-tag">{t!.data.nombre}</li>
+													))}
+												</ul>
+											) : null;
+										})()
+									}
+								</div>
+							</li>
+						))}
+					</ul>
+				</section>
+			))
+		)
+	}
+</article>
+
+<style>
+	.menu {
+		max-width: 40rem;
+		margin: 0 auto;
+		padding: 1.5rem 1rem 3rem;
+	}
+	.menu:has(.menu-list--cols-2) {
+		max-width: 56rem;
+	}
+	.menu-header {
+		margin-bottom: 2rem;
+	}
+	.menu-logo {
+		max-height: 4rem;
+		width: auto;
+		margin-bottom: 0.75rem;
+		border-radius: var(--radius, 0.625rem);
+	}
+	.menu-desc {
+		opacity: 0.8;
+	}
+	.menu-switcher {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-top: 1rem;
+	}
+	.menu-switcher-link {
+		font-size: 0.875rem;
+		padding: 0.35rem 0.75rem;
+		border: 1px solid var(--border, currentColor);
+		border-radius: var(--radius, 0.625rem);
+		text-decoration: none;
+		color: inherit;
+		opacity: 0.75;
+	}
+	.menu-switcher-link.is-active {
+		opacity: 1;
+		border-color: var(--primary, currentColor);
+		color: var(--primary, currentColor);
+	}
+	.menu-toc {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1rem;
+		margin-top: 1rem;
+		font-size: 0.875rem;
+	}
+	.menu-toc-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		color: var(--primary, currentColor);
+		text-decoration: none;
+	}
+	.menu-toc-link:hover {
+		text-decoration: underline;
+	}
+	.menu-toc-icon {
+		width: 1rem;
+		height: 1rem;
+		flex-shrink: 0;
+	}
+	.menu-section {
+		margin-bottom: 2rem;
+		scroll-margin-top: 1rem;
+	}
+	.menu-section-cover {
+		margin: 0 0 0.75rem;
+		border-radius: var(--radius, 0.625rem);
+		overflow: hidden;
+		aspect-ratio: 3 / 1;
+		width: 100%;
+		background: color-mix(in oklab, var(--muted, #888) 20%, transparent);
+	}
+	.menu-section-cover-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+	.menu-section-title {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 1rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		border-bottom: 1px solid var(--border, currentColor);
+		padding-bottom: 0.35rem;
+		margin-bottom: 1rem;
+	}
+	.menu-section-icon {
+		width: 1.15rem;
+		height: 1.15rem;
+		flex-shrink: 0;
+	}
+	.menu-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.menu-list--cols-2 {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 1rem;
+	}
+	@media (min-width: 640px) {
+		.menu-list--cols-2 {
+			grid-template-columns: 1fr 1fr;
+		}
+	}
+	.menu-item {
+		display: flex;
+		gap: 0.75rem;
+		align-items: flex-start;
+	}
+	.menu-item-image {
+		width: 4.5rem;
+		aspect-ratio: 4 / 5;
+		height: auto;
+		object-fit: cover;
+		flex-shrink: 0;
+		border-radius: var(--radius, 0.625rem);
+	}
+	.menu-item-body {
+		flex: 1;
+		min-width: 0;
+	}
+	.menu-item-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: baseline;
+	}
+	.menu-item-row h3 {
+		margin: 0;
+		font-size: 1.05rem;
+	}
+	.menu-price {
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+		color: var(--primary, inherit);
+	}
+	.menu-item-body p {
+		margin: 0.25rem 0 0;
+		opacity: 0.75;
+		font-size: 0.95rem;
+	}
+	.menu-item-tags {
+		list-style: none;
+		padding: 0;
+		margin: 0.35rem 0 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+	.menu-item-tag {
+		font-size: 0.7rem;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		opacity: 0.7;
+		border: 1px solid var(--border, currentColor);
+		border-radius: var(--radius, 0.375rem);
+		padding: 0.1rem 0.4rem;
+	}
+</style>

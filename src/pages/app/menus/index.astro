@@ -1,0 +1,182 @@
+---
+import Dashboard from "@/layouts/Dashboard.astro";
+import { requireOwner } from "@/lib/auth/require-owner";
+import {
+	assertMenuBelongsToRestaurant,
+	deleteMenuViaApi,
+	getMenuBySlug,
+	listMenusForRestaurant,
+	updateMenuViaApi,
+	writesEnabled,
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "@/lib/emdash/owner-restaurant";
+import { getMenuTemplateMeta } from "@/lib/menu-templates/registry";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import PlusIcon from "@tabler/icons/outline/plus.svg";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const canWrite = writesEnabled();
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+
+async function ownedMenu(slug: string) {
+	const { entry } = await getMenuBySlug(slug);
+	if (!entry || !assertMenuBelongsToRestaurant(entry, restaurantId)) {
+		throw new Error("Menú no encontrado.");
+	}
+	return entry;
+}
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const action = String(form.get("action") ?? "");
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (action === "save") {
+				const slug = String(form.get("slug") ?? "");
+				const nombre = String(form.get("nombre") ?? "").trim();
+				if (!slug || !nombre) throw new Error("Datos incompletos.");
+				const entry = await ownedMenu(slug);
+				await updateMenuViaApi(
+					entry.data.id,
+					{ nombre, descripcion: String(form.get("descripcion") ?? "").trim() || null },
+					restaurantId,
+				);
+				return Astro.redirect(savedRedirect("/app/menus", { action: "save" }));
+			}
+			if (action === "delete") {
+				const slug = String(form.get("slug") ?? "");
+				const { entries } = await listMenusForRestaurant(restaurantId);
+				if (entries.length <= 1) {
+					throw new Error("No se puede borrar el único menú del restaurante.");
+				}
+				const entry = await ownedMenu(slug);
+				await deleteMenuViaApi(entry.data.id, restaurantId);
+				return Astro.redirect(savedRedirect("/app/menus", { action: "delete" }));
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo guardar";
+		}
+	}
+}
+
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+let menus: Awaited<ReturnType<typeof listMenusForRestaurant>>["entries"] = [];
+try {
+	({ entries: menus } = await listMenusForRestaurant(restaurantId));
+} catch (err) {
+	error = error ?? (err instanceof Error ? err.message : "No se pudieron cargar los menús");
+}
+---
+
+<Dashboard
+	title="DigiMenu — Menús"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-3xl flex-col gap-6">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Menús</h1>
+				<p class="text-muted-foreground">
+					Cartas del restaurante (almuerzo, cena, vinos…). Cada una puede tener su plantilla.
+				</p>
+			</div>
+			{
+				canWrite && (
+					<Button href="/app/menus/new" variant="primary" size="sm">
+						<PlusIcon class="size-4" />
+						Nuevo menú
+					</Button>
+				)
+			}
+		</div>
+
+		{saved && <p class="text-sm text-success">Guardado.</p>}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		{
+			menus.length === 0 ? (
+				<p class="text-sm text-muted-foreground">
+					Todavía no hay menús. Creá uno o ejecutá la migración para generar “Carta”.
+				</p>
+			) : (
+				<ul class="flex flex-col gap-3">
+					{menus.map((menu) => {
+						const pathId = menu.slug ?? menu.id;
+						const plantilla = getMenuTemplateMeta(menu.data.plantilla ?? "classic");
+						return (
+							<li class="rounded-lg border border-border p-4">
+								<form method="POST" class="flex flex-col gap-3" data-astro-reload>
+									<input type="hidden" name="slug" value={pathId} />
+									<div class="flex flex-wrap items-end gap-3">
+										<div class="min-w-[12rem] flex-1">
+											<label class="text-xs text-muted-foreground" for={`nombre-${pathId}`}>
+												Nombre
+											</label>
+											<Input
+												id={`nombre-${pathId}`}
+												name="nombre"
+												value={menu.data.nombre}
+												disabled={!canWrite}
+											/>
+										</div>
+										<div class="min-w-[12rem] flex-1">
+											<label class="text-xs text-muted-foreground" for={`desc-${pathId}`}>
+												Descripción
+											</label>
+											<Input
+												id={`desc-${pathId}`}
+												name="descripcion"
+												value={menu.data.descripcion ?? ""}
+												disabled={!canWrite}
+											/>
+										</div>
+										<p class="text-xs text-muted-foreground pb-2">
+											Plantilla: {plantilla.label}
+										</p>
+									</div>
+									<div class="flex flex-wrap gap-2">
+										{canWrite && (
+											<Button type="submit" name="action" value="save" size="sm" variant="primary">
+												Guardar
+											</Button>
+										)}
+										<Button href={`/app/menus/${pathId}`} size="sm" variant="outline">
+											Abrir
+										</Button>
+										{canWrite && menus.length > 1 && (
+											<Button
+												type="submit"
+												name="action"
+												value="delete"
+												size="sm"
+												variant="ghost"
+												onclick="return confirm('¿Borrar este menú?');"
+											>
+												Borrar
+											</Button>
+										)}
+									</div>
+								</form>
+							</li>
+						);
+					})}
+				</ul>
+			)
+		}
+	</div>
+</Dashboard>

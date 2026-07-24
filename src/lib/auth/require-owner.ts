@@ -27,17 +27,24 @@ type RedirectResult = { ok: false; redirect: string };
 type OkResult = { ok: true; owner: OwnerContext };
 export type RequireOwnerResult = RedirectResult | OkResult;
 
+function snapshotLogo(
+	image: EmDashRestaurante["data"]["logo_light"],
+): OwnerRestaurantSnapshot["logo_light"] {
+	const src = imageSrc(image);
+	return src ? { src, alt: image?.alt } : null;
+}
+
 export function restaurantSnapshotFromEntry(
 	entry: EmDashRestaurante | null | undefined,
 	fallbackName: string,
 ): OwnerRestaurantSnapshot {
-	const logoSrc = imageSrc(entry?.data.logo);
 	return {
 		nombre: entry?.data.nombre ?? fallbackName,
 		descripcion: entry?.data.descripcion ?? null,
 		menu_layout: entry?.data.menu_layout,
 		theme: entry?.data.theme,
-		logo: logoSrc ? { src: logoSrc, alt: entry?.data.logo?.alt } : null,
+		logo_light: snapshotLogo(entry?.data.logo_light),
+		logo_dark: snapshotLogo(entry?.data.logo_dark),
 	};
 }
 

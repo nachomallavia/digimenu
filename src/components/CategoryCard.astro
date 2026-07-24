@@ -1,0 +1,441 @@
+---
+import CategoryIcon from "@/components/CategoryIcon.astro";
+import TrashIcon from "@tabler/icons/outline/trash.svg";
+import SaveIcon from "@tabler/icons/outline/device-floppy.svg";
+import { imageSrc, type EmDashImage } from "@/lib/emdash/client";
+import { CATEGORY_ICON_OPTIONS } from "@/lib/category-icons";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/starwind/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/starwind/card";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@/components/starwind/dialog";
+import CircleOff from "@tabler/icons/outline/circle-off.svg";
+
+interface Props {
+	slug: string;
+	nombre: string;
+	icon?: string | null;
+	cover?: EmDashImage;
+	canWrite: boolean;
+}
+
+const { slug, nombre, icon = null, cover, canWrite } = Astro.props;
+const coverSrc = imageSrc(cover) ?? "";
+const iconValue = icon ?? "";
+---
+
+<div
+	data-category-card={slug}
+	data-can-write={canWrite ? "true" : "false"}
+	data-original-label={nombre}
+	data-original-icon={iconValue}
+	data-original-has-cover={coverSrc ? "1" : "0"}
+	data-original-cover-src={coverSrc}
+>
+	<Card>
+		<form method="POST" class="flex flex-col gap-3" enctype="multipart/form-data" data-category-save-form>
+			<input type="hidden" name="action" value="save" />
+			<input type="hidden" name="slug" value={slug} />
+			<CardHeader>
+				<CardTitle>
+					<Label for={`label-${slug}`} class="text-sm font-light text-muted-foreground">Nombre</Label>
+					<Input
+						id={`label-${slug}`}
+						type="text"
+						name="label"
+						required
+						disabled={!canWrite}
+						value={nombre}
+						data-field="label"
+						class="w-full h-10 rounded-md border border-border p-2"
+					/>
+				</CardTitle>
+				<span class="inline-flex items-center px-2 py-0.5 text-xs font-medium text-muted-foreground">
+					{slug}
+				</span>
+			</CardHeader>
+			<CardContent class="flex flex-col gap-3">
+				<div class="flex flex-col gap-1.5">
+					<Label class="text-sm font-light text-muted-foreground">Icono (opcional)</Label>
+					<div class="flex items-center gap-2">
+						<span data-icon-preview class="inline-flex size-5 shrink-0 items-center justify-center">
+							<span data-icon-id="" class:list={[iconValue === "" ? "inline-flex" : "hidden"]}>
+								<CircleOff class="text-muted-foreground size-5 shrink-0" aria-hidden="true" />
+							</span>
+							{CATEGORY_ICON_OPTIONS.map((opt) => (
+								<span
+									data-icon-id={opt.id}
+									class:list={[iconValue === opt.id ? "inline-flex" : "hidden"]}
+								>
+									<CategoryIcon icon={opt.id} class="size-5 shrink-0" />
+								</span>
+							))}
+						</span>
+						<Select name="icon" class="w-full" defaultValue={iconValue} data-field="icon">
+							<SelectTrigger class="w-full" size="sm" disabled={!canWrite}>
+								<SelectValue placeholder="Sin icono" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="">
+									<span class="inline-flex items-center gap-2">
+										<CircleOff class="text-muted-foreground size-5 shrink-0 flex!" />
+										Sin icono
+									</span>
+								</SelectItem>
+								{CATEGORY_ICON_OPTIONS.map((opt) => (
+									<SelectItem value={opt.id}>
+										<span class="inline-flex items-center gap-2">
+											<CategoryIcon icon={opt.id} class="size-5 shrink-0 flex!" />
+											{opt.label}
+										</span>
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+				</div>
+
+				<div class="flex flex-col gap-2">
+					<div class="flex justify-between items-center">
+					<Label class="text-sm font-light text-muted-foreground">Portada (opcional)</Label>
+					<div
+					class:list={["flex flex-col gap-2", !coverSrc && "hidden"]}
+					data-remove-cover-actions
+				>
+					<div data-remove-cover-idle>
+						<Dialog>
+							<DialogTrigger asChild>
+								<Button type="button" variant="ghost" size="sm" disabled={!canWrite}>
+									Quitar portada
+								</Button>
+							</DialogTrigger>
+							<DialogContent class="max-w-md">
+								<DialogHeader>
+									<DialogTitle>¿Quitar portada?</DialogTitle>
+									<DialogDescription>
+										Se quitará la portada de “{nombre}” al guardar. Podés deshacer antes de guardar.
+									</DialogDescription>
+								</DialogHeader>
+								<DialogFooter>
+									<DialogClose asChild>
+										<Button type="button" variant="outline" size="sm">Cancelar</Button>
+									</DialogClose>
+									<DialogClose asChild>
+										<Button
+											type="button"
+											variant="error"
+											size="sm"
+											disabled={!canWrite}
+											data-confirm-remove-cover
+										>
+											Quitar
+										</Button>
+									</DialogClose>
+								</DialogFooter>
+							</DialogContent>
+						</Dialog>
+					</div>
+					<div data-remove-cover-pending class="hidden">
+						<div class="flex flex-col gap-2">
+							
+							<Button type="button" variant="ghost" size="sm" disabled={!canWrite} data-undo-remove-cover>
+								Deshacer quitar portada
+							</Button>
+						</div>
+					</div>
+				</div>
+					</div>
+					<img
+						data-cover-preview
+						src={coverSrc || undefined}
+						alt={nombre}
+						hidden={!coverSrc}
+						class="h-24 w-full rounded-md border border-border object-cover"
+					/>
+					<input type="hidden" name="remove_cover" value="" data-field="remove_cover" />
+					<div class="flex flex-wrap items-center gap-2">
+						<input
+							id={`cover-${slug}`}
+							name="cover"
+							type="file"
+							accept="image/*"
+							disabled={!canWrite}
+							data-field="cover"
+							class="sr-only"
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							disabled={!canWrite}
+							data-cover-pick
+							class="w-full"
+						>
+							Elegir nueva imagen
+						</Button>
+						<span data-cover-filename class="text-muted-foreground text-sm"></span>
+					</div>
+					</div>
+
+				<Button
+					type="submit"
+					variant="outline"
+					size="sm"
+					class="py-6"
+					disabled
+					data-save-category
+				>
+					<span class="inline-flex items-center gap-2">
+						<SaveIcon class="size-5 shrink-0" aria-hidden="true" />
+						Guardar cambios
+					</span>
+				</Button>
+			</CardContent>
+		</form>
+		<div class="px-6 pb-4 flex justify-center">
+			<Dialog>
+				<DialogTrigger asChild>
+					<Button type="button" variant="secondary" size="sm" disabled={!canWrite}>
+						<span class="inline-flex items-center gap-2 text-muted-foreground hover:text-red-500">
+							<TrashIcon class="size-5 shrink-0" aria-hidden="true" />
+							Eliminar categoría
+						</span>
+					</Button>
+				</DialogTrigger>
+				<DialogContent class="max-w-md">
+					<DialogHeader>
+						<DialogTitle>¿Eliminar categoría?</DialogTitle>
+						<DialogDescription>
+							Se eliminará “{nombre}”. Los productos quedan sin categoría. No se puede deshacer.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button type="button" variant="outline" size="sm">Cancelar</Button>
+						</DialogClose>
+						<form method="POST" enctype="application/x-www-form-urlencoded">
+							<input type="hidden" name="action" value="delete" />
+							<input type="hidden" name="slug" value={slug} />
+							<Button type="submit" variant="error" size="sm" disabled={!canWrite}>
+								Eliminar
+							</Button>
+						</form>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+		</div>
+	</Card>
+</div>
+
+<script>
+	import type { SelectChangeEvent } from "@/components/starwind/select";
+	import {
+		clearCoverPreview,
+		coverPreviewUrl,
+		isCategoriaDirty,
+		pending,
+		setCategoriaField,
+		setCoverPreview,
+	} from "@/lib/owner-edits/categorias-edits";
+
+	const PRIMARY_CLASSES = [
+		"bg-primary",
+		"text-primary-foreground",
+		"hover:bg-primary/90",
+		"focus-visible:ring-primary/50",
+	];
+	const OUTLINE_CLASSES = [
+		"dark:border-input",
+		"focus-visible:ring-outline/50",
+		"bg-background",
+		"dark:bg-input/30",
+		"focus-visible:border-outline",
+		"hover:bg-muted",
+		"dark:hover:bg-input/50",
+		"hover:text-foreground",
+		"border",
+		"shadow-xs",
+	];
+
+	function setSaveButtonDirty(btn: HTMLButtonElement, dirty: boolean, canWrite: boolean) {
+		btn.disabled = !canWrite || !dirty;
+		btn.toggleAttribute("data-dirty", dirty);
+		if (dirty && canWrite) {
+			btn.classList.remove(...OUTLINE_CLASSES);
+			btn.classList.add(...PRIMARY_CLASSES);
+		} else {
+			btn.classList.remove(...PRIMARY_CLASSES);
+			btn.classList.add(...OUTLINE_CLASSES);
+		}
+	}
+
+	function showIconPreview(card: HTMLElement, iconId: string) {
+		const root = card.querySelector<HTMLElement>("[data-icon-preview]");
+		if (!root) return;
+		root.querySelectorAll<HTMLElement>("[data-icon-id]").forEach((el) => {
+			const match = el.dataset.iconId === iconId;
+			el.classList.toggle("hidden", !match);
+			el.classList.toggle("inline-flex", match);
+		});
+	}
+
+	function syncCoverPreview(card: HTMLElement) {
+		const slug = card.dataset.categoryCard;
+		if (!slug) return;
+		const img = card.querySelector<HTMLImageElement>("[data-cover-preview]");
+		const actions = card.querySelector<HTMLElement>("[data-remove-cover-actions]");
+		const idle = card.querySelector<HTMLElement>("[data-remove-cover-idle]");
+		const pendingUi = card.querySelector<HTMLElement>("[data-remove-cover-pending]");
+		const removeInput = card.querySelector<HTMLInputElement>('[data-field="remove_cover"]');
+		if (!img) return;
+
+		const previewMap = coverPreviewUrl.get();
+		const hasKey = Object.prototype.hasOwnProperty.call(previewMap, slug);
+		const originalSrc = card.dataset.originalCoverSrc ?? "";
+		const hasOriginal = card.dataset.originalHasCover === "1";
+		const removing =
+			removeInput?.value === "1" || pending.get()[slug]?.removeCover === true;
+
+		let src = "";
+		if (hasKey) {
+			const v = previewMap[slug];
+			src = typeof v === "string" ? v : "";
+		} else {
+			src = originalSrc;
+		}
+
+		if (src) {
+			img.src = src;
+			img.hidden = false;
+		} else {
+			img.removeAttribute("src");
+			img.hidden = true;
+		}
+
+		if (actions) actions.classList.toggle("hidden", !hasOriginal);
+		if (idle) idle.classList.toggle("hidden", removing);
+		if (pendingUi) pendingUi.classList.toggle("hidden", !removing);
+		if (removeInput && !hasOriginal) removeInput.value = "";
+	}
+
+	function syncCard(card: HTMLElement) {
+		const slug = card.dataset.categoryCard;
+		if (!slug) return;
+		const canWrite = card.dataset.canWrite === "true";
+		const saveBtn = card.querySelector<HTMLButtonElement>("[data-save-category]");
+		if (saveBtn) setSaveButtonDirty(saveBtn, isCategoriaDirty(slug), canWrite);
+		syncCoverPreview(card);
+
+		const patch = pending.get()[slug];
+		const icon =
+			patch && "icon" in patch
+				? (patch.icon ?? "")
+				: (card.dataset.originalIcon ?? "");
+		showIconPreview(card, icon);
+	}
+
+	function bindCard(card: HTMLElement) {
+		if (card.dataset.bound === "1") return;
+		card.dataset.bound = "1";
+
+		const slug = card.dataset.categoryCard;
+		if (!slug) return;
+		const canWrite = card.dataset.canWrite === "true";
+		syncCard(card);
+		if (!canWrite) return;
+
+		const originalLabel = card.dataset.originalLabel ?? "";
+		const originalIcon = card.dataset.originalIcon ?? "";
+
+		const labelInput = card.querySelector<HTMLInputElement>('[data-field="label"]');
+		const iconSelect = card.querySelector<HTMLElement>('[data-field="icon"]');
+		const coverInput = card.querySelector<HTMLInputElement>('[data-field="cover"]');
+		const coverPick = card.querySelector<HTMLButtonElement>("[data-cover-pick]");
+		const coverFilename = card.querySelector<HTMLElement>("[data-cover-filename]");
+		const removeInput = card.querySelector<HTMLInputElement>('[data-field="remove_cover"]');
+		const confirmRemove = card.querySelector<HTMLButtonElement>("[data-confirm-remove-cover]");
+		const undoRemove = card.querySelector<HTMLButtonElement>("[data-undo-remove-cover]");
+
+		function setCoverFilename(name: string | null) {
+			if (!coverFilename) return;
+			coverFilename.textContent = name?.trim() ? `Imagen seleccionada: ${name}` : "";
+		}
+
+		coverPick?.addEventListener("click", () => {
+			coverInput?.click();
+		});
+
+		labelInput?.addEventListener("input", () => {
+			setCategoriaField(slug, "label", labelInput.value.trim(), originalLabel);
+		});
+
+		iconSelect?.addEventListener("starwind-select:change", ((e: SelectChangeEvent) => {
+			const value = e.detail?.value ?? "";
+			setCategoriaField(slug, "icon", value === "" ? null : value, originalIcon || null);
+			showIconPreview(card, value);
+		}) as EventListener);
+
+		coverInput?.addEventListener("change", () => {
+			const file = coverInput.files?.[0];
+			if (file) {
+				const url = URL.createObjectURL(file);
+				setCoverPreview(slug, url);
+				setCategoriaField(slug, "coverFile", true, false);
+				if (removeInput) removeInput.value = "";
+				setCategoriaField(slug, "removeCover", false, false);
+				setCoverFilename(file.name);
+			} else {
+				clearCoverPreview(slug);
+				setCategoriaField(slug, "coverFile", false, false);
+				setCoverFilename(null);
+			}
+			syncCoverPreview(card);
+		});
+
+		confirmRemove?.addEventListener("click", () => {
+			if (coverInput) coverInput.value = "";
+			if (removeInput) removeInput.value = "1";
+			setCategoriaField(slug, "coverFile", false, false);
+			setCategoriaField(slug, "removeCover", true, false);
+			setCoverPreview(slug, null);
+			setCoverFilename(null);
+			syncCoverPreview(card);
+		});
+
+		undoRemove?.addEventListener("click", () => {
+			if (removeInput) removeInput.value = "";
+			setCategoriaField(slug, "removeCover", false, false);
+			clearCoverPreview(slug);
+			setCoverFilename(null);
+			syncCoverPreview(card);
+		});
+	}
+
+	let storesBound = false;
+
+	function initCategoryCards() {
+		document.querySelectorAll<HTMLElement>("[data-category-card]").forEach(bindCard);
+		if (!storesBound) {
+			storesBound = true;
+			pending.subscribe(() => {
+				document.querySelectorAll<HTMLElement>("[data-category-card]").forEach(syncCard);
+			});
+			coverPreviewUrl.subscribe(() => {
+				document.querySelectorAll<HTMLElement>("[data-category-card]").forEach(syncCoverPreview);
+			});
+		}
+	}
+
+	initCategoryCards();
+	document.addEventListener("astro:page-load", initCategoryCards);
+</script>

@@ -1,0 +1,216 @@
+---
+import Dashboard from "@/layouts/Dashboard.astro";
+import { requireOwner } from "@/lib/auth/require-owner";
+import {
+	assertCategoriaBelongsToRestaurant,
+	createProductoViaApi,
+	formImageFile,
+	getCategoriaBySlug,
+	listCategoriasForRestaurant,
+	uploadMediaViaApi,
+	writesEnabled,
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "@/lib/emdash/owner-restaurant";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Textarea } from "@/components/starwind/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const canWrite = writesEnabled();
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+
+let error: string | null = null;
+let formValues = {
+	nombre: "",
+	precio: "",
+	descripcion: "",
+	categoria: "",
+};
+
+const { entries: categorias } = await listCategoriasForRestaurant(restaurantId);
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const nombre = String(form.get("nombre") ?? "").trim();
+	const precioRaw = String(form.get("precio") ?? "").trim();
+	const descripcion = String(form.get("descripcion") ?? "").trim();
+	const categoriaRef = String(form.get("categoria") ?? "").trim();
+	const imageFile = formImageFile(form, "imagen");
+
+	formValues = {
+		nombre,
+		precio: precioRaw,
+		descripcion,
+		categoria: categoriaRef,
+	};
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			const precio = Number(precioRaw);
+			if (!nombre || !Number.isFinite(precio) || precio < 0) {
+				throw new Error("Nombre y precio válidos son obligatorios.");
+			}
+
+			let categoriaId: string | null = null;
+			if (categoriaRef) {
+				const { entry: cat } = await getCategoriaBySlug(categoriaRef);
+				if (!cat || !assertCategoriaBelongsToRestaurant(cat, restaurantId)) {
+					throw new Error("Categoría inválida.");
+				}
+				categoriaId = cat.data.id;
+			}
+
+			const imagen = imageFile
+				? await uploadMediaViaApi(imageFile, nombre)
+				: undefined;
+
+			const created = await createProductoViaApi({
+				nombre,
+				precio: Math.round(precio),
+				descripcion: descripcion || null,
+				restauranteId: restaurantId,
+				categoriaId,
+				...(imagen !== undefined ? { imagen } : {}),
+			});
+
+			const dest =
+				created.item?.slug ||
+				created.item?.id ||
+				"";
+			if (!dest) {
+				return Astro.redirect("/app/productos?fresh=1");
+			}
+			return Astro.redirect(savedRedirect(`/app/productos/${dest}`));
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo crear el producto";
+		}
+	}
+}
+---
+
+<Dashboard
+	title="DigiMenu — Nuevo producto"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<p class="mb-1 text-sm">
+				<a href="/app/productos" class="text-muted-foreground hover:text-foreground">
+					← Productos
+				</a>
+			</p>
+			<h1 class="text-2xl font-semibold tracking-tight">Nuevo producto</h1>
+			<p class="text-muted-foreground">Creá un ítem del menú de tu restaurante.</p>
+		</div>
+
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Datos</CardTitle>
+				
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-4" enctype="multipart/form-data" data-astro-reload>
+					<div class="flex flex-col gap-1.5">
+						<Label for="nombre">Nombre</Label>
+						<Input
+							id="nombre"
+							name="nombre"
+							required
+							value={formValues.nombre}
+							disabled={!canWrite}
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="precio">Precio</Label>
+						<Input
+							id="precio"
+							name="precio"
+							type="number"
+							min="0"
+							step="1"
+							required
+							value={formValues.precio}
+							disabled={!canWrite}
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="descripcion">Descripción</Label>
+						<Textarea id="descripcion" name="descripcion" rows={4} disabled={!canWrite}>
+							{formValues.descripcion}
+						</Textarea>
+					</div>
+
+					<div class="flex flex-col gap-2">
+						<Label for="imagen">Imagen</Label>
+						<Input
+							id="imagen"
+							name="imagen"
+							type="file"
+							accept="image/*"
+							disabled={!canWrite}
+						/>
+					</div>
+
+					<div class="flex flex-col gap-1.5">
+						<Label for="categoria">Categoría</Label>
+						{
+							categorias.length === 0 ? (
+								<p class="text-muted-foreground text-sm">
+									No hay categorías. Creá alguna en{" "}
+									<a href="/app/categorias" class="underline">
+										Categorías
+									</a>
+									.
+								</p>
+							) : (
+								<select
+									id="categoria"
+									name="categoria"
+									disabled={!canWrite}
+									class="border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									<option value="" selected={!formValues.categoria}>
+										Sin categoría
+									</option>
+									{categorias.map((cat) => (
+										<option
+											value={cat.data.id}
+											selected={formValues.categoria === cat.data.id}
+										>
+											{cat.data.nombre}
+										</option>
+									))}
+								</select>
+							)
+						}
+					</div>
+
+					<div class="flex flex-wrap gap-2">
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Crear producto
+						</Button>
+						<Button href="/app/productos" variant="outline">
+							Cancelar
+						</Button>
+					</div>
+				</form>
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>

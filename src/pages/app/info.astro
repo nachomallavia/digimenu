@@ -1,14 +1,15 @@
 ---
 import Dashboard from "../../layouts/Dashboard.astro";
-import { refreshOwnerSnapshot, requireOwner } from "../../lib/auth/require-owner";
+import { refreshOwnerSnapshot, requireOwner, restaurantSnapshotFromEntry } from "../../lib/auth/require-owner";
 import {
 	formImageFile,
+	imageRefForWrite,
 	imageSrc,
 	updateRestauranteViaApi,
 	uploadMediaViaApi,
 	writesEnabled,
+	type EmDashRestaurante,
 } from "../../lib/emdash/client";
-import type { OwnerSnapshotLogo } from "../../lib/auth/owner-session";
 import { loadOwnerRestaurant, savedRedirect } from "../../lib/emdash/owner-restaurant";
 import { Button } from "@/components/starwind/button";
 import { Input } from "@/components/starwind/input";
@@ -32,8 +33,10 @@ if (Astro.request.method === "POST") {
 	const form = await Astro.request.formData();
 	const nombre = String(form.get("nombre") ?? "").trim();
 	const descripcion = String(form.get("descripcion") ?? "").trim();
-	const removeLogo = form.get("remove_logo") === "1";
-	const logoFile = formImageFile(form, "logo");
+	const removeLogoLight = form.get("remove_logo_light") === "1";
+	const removeLogoDark = form.get("remove_logo_dark") === "1";
+	const logoLightFile = formImageFile(form, "logo_light");
+	const logoDarkFile = formImageFile(form, "logo_dark");
 
 	if (!nombre) {
 		error = "El nombre es obligatorio.";
@@ -45,22 +48,49 @@ if (Astro.request.method === "POST") {
 				nombre,
 				descripcion: descripcion || null,
 			};
-			let logoPatch: OwnerSnapshotLogo | undefined;
-			if (removeLogo) {
-				update.logo = null;
-				logoPatch = null;
-			} else if (logoFile) {
-				const uploaded = await uploadMediaViaApi(logoFile, nombre);
-				update.logo = uploaded;
-				const uploadedSrc = imageSrc(uploaded);
-				if (uploadedSrc) logoPatch = { src: uploadedSrc, alt: uploaded.alt };
+
+			if (removeLogoLight) {
+				update.logo_light = null;
+			} else if (logoLightFile) {
+				const uploaded = await uploadMediaViaApi(logoLightFile, `${nombre} (claro)`);
+				update.logo_light = imageRefForWrite(uploaded);
 			}
-			await updateRestauranteViaApi(owner.restaurant.emdash_restaurant_id, update);
-			await refreshOwnerSnapshot(Astro.cookies, owner, {
-				nombre,
-				descripcion: descripcion || null,
-				...(logoPatch !== undefined ? { logo: logoPatch } : {}),
-			});
+
+			if (removeLogoDark) {
+				update.logo_dark = null;
+			} else if (logoDarkFile) {
+				const uploaded = await uploadMediaViaApi(logoDarkFile, `${nombre} (oscuro)`);
+				update.logo_dark = imageRefForWrite(uploaded);
+			}
+
+			const updated = await updateRestauranteViaApi(
+				owner.restaurant.emdash_restaurant_id,
+				update,
+			);
+			const data = updated.item.data;
+			const entryForSnap = {
+				id: owner.restaurant.emdash_restaurant_slug,
+				slug: owner.restaurant.emdash_restaurant_slug,
+				status: "published",
+				data: {
+					id: owner.restaurant.emdash_restaurant_id,
+					nombre: typeof data.nombre === "string" ? data.nombre : nombre,
+					descripcion:
+						typeof data.descripcion === "string"
+							? data.descripcion
+							: descripcion || undefined,
+					menu_layout: data.menu_layout,
+					theme: data.theme,
+					logo_light: data.logo_light as EmDashRestaurante["data"]["logo_light"],
+					logo_dark: data.logo_dark as EmDashRestaurante["data"]["logo_dark"],
+				},
+			} satisfies EmDashRestaurante;
+
+			await refreshOwnerSnapshot(
+				Astro.cookies,
+				owner,
+				restaurantSnapshotFromEntry(entryForSnap, nombre),
+			);
 			return Astro.redirect(savedRedirect("/app/info"));
 		} catch (err) {
 			error = err instanceof Error ? err.message : "No se pudo guardar";
@@ -68,20 +98,16 @@ if (Astro.request.method === "POST") {
 	}
 }
 
-// Session snapshot includes the logo; pre-logo cookies fall back to one
-// EmDash read + cookie upgrade (requireLogo).
-const restaurant = await loadOwnerRestaurant(owner, {
-	fromSession: true,
-	requireLogo: true,
-	cookies: Astro.cookies,
-});
+// Fresh EmDash read so logo previews match live media (session snapshot can lag).
+const restaurant = await loadOwnerRestaurant(owner);
 if (!restaurant.entry) {
 	error = error ?? "No se encontró el restaurante en EmDash.";
 }
 
 const nombre = restaurant.entry?.data.nombre ?? owner.restaurantName;
 const descripcion = restaurant.entry?.data.descripcion ?? "";
-const logoSrc = imageSrc(restaurant.entry?.data.logo) ?? null;
+const logoLightSrc = imageSrc(restaurant.entry?.data.logo_light) ?? null;
+const logoDarkSrc = imageSrc(restaurant.entry?.data.logo_dark) ?? null;
 ---
 
 <Dashboard
@@ -93,7 +119,9 @@ const logoSrc = imageSrc(restaurant.entry?.data.logo) ?? null;
 	<div class="mx-auto flex max-w-2xl flex-col gap-6">
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">Info restaurante</h1>
-			<p class="text-muted-foreground">Nombre, descripción, logo y datos visibles en el menú público.</p>
+			<p class="text-muted-foreground">
+				Nombre, descripción, logos y datos visibles en el menú público.
+			</p>
 		</div>
 
 		{
@@ -125,27 +153,77 @@ const logoSrc = imageSrc(restaurant.entry?.data.logo) ?? null;
 							disabled={!canWrite}
 						>{descripcion}</Textarea>
 					</div>
-					<div class="flex flex-col gap-2">
-						<Label for="logo">Logo</Label>
-						{
-							logoSrc && (
-								<img
-									src={logoSrc}
-									alt={restaurant.entry?.data.logo?.alt ?? nombre}
-									class="h-20 w-auto max-w-48 rounded-md border border-border object-contain"
+					<div class="grid gap-4 sm:grid-cols-2" data-logo-previews>
+						<div class="flex flex-col gap-2">
+							<Label for="logo_light">Logo (fondo claro)</Label>
+							<img
+								data-logo-preview="logo_light"
+								src={logoLightSrc ?? ""}
+								alt={restaurant.entry?.data.logo_light?.alt ?? `${nombre} (claro)`}
+								class:list={[
+									"h-20 w-auto max-w-full rounded-md border border-border bg-white object-contain p-2",
+									!logoLightSrc && "hidden",
+								]}
+							/>
+							<Input
+								id="logo_light"
+								name="logo_light"
+								type="file"
+								accept="image/*"
+								disabled={!canWrite}
+								data-logo-input="logo_light"
+							/>
+							<label
+								class:list={["flex items-center gap-2 text-sm", !logoLightSrc && "hidden"]}
+								data-logo-remove="logo_light"
+							>
+								<input
+									type="checkbox"
+									name="remove_logo_light"
+									value="1"
+									disabled={!canWrite}
+									data-logo-remove-check="logo_light"
 								/>
-							)
-						}
-						<Input id="logo" name="logo" type="file" accept="image/*" disabled={!canWrite} />
-						{
-							logoSrc && (
-								<label class="flex items-center gap-2 text-sm">
-									<input type="checkbox" name="remove_logo" value="1" disabled={!canWrite} />
-									Quitar logo
-								</label>
-							)
-						}
+								Quitar logo claro
+							</label>
+						</div>
+						<div class="flex flex-col gap-2">
+							<Label for="logo_dark">Logo (fondo oscuro)</Label>
+							<img
+								data-logo-preview="logo_dark"
+								src={logoDarkSrc ?? ""}
+								alt={restaurant.entry?.data.logo_dark?.alt ?? `${nombre} (oscuro)`}
+								class:list={[
+									"h-20 w-auto max-w-full rounded-md border border-border bg-neutral-900 object-contain p-2",
+									!logoDarkSrc && "hidden",
+								]}
+							/>
+							<Input
+								id="logo_dark"
+								name="logo_dark"
+								type="file"
+								accept="image/*"
+								disabled={!canWrite}
+								data-logo-input="logo_dark"
+							/>
+							<label
+								class:list={["flex items-center gap-2 text-sm", !logoDarkSrc && "hidden"]}
+								data-logo-remove="logo_dark"
+							>
+								<input
+									type="checkbox"
+									name="remove_logo_dark"
+									value="1"
+									disabled={!canWrite}
+									data-logo-remove-check="logo_dark"
+								/>
+								Quitar logo oscuro
+							</label>
+						</div>
 					</div>
+					<p class="text-muted-foreground text-xs">
+						Si solo subís uno, se usa ese en ambos modos del menú.
+					</p>
 					<div>
 						<Button type="submit" variant="primary" disabled={!canWrite}>
 							Guardar
@@ -156,3 +234,44 @@ const logoSrc = imageSrc(restaurant.entry?.data.logo) ?? null;
 		</Card>
 	</div>
 </Dashboard>
+
+<script>
+	function bindLogoPreviews(root: ParentNode = document) {
+		const objectUrls = new Map<string, string>();
+
+		for (const input of root.querySelectorAll<HTMLInputElement>("[data-logo-input]")) {
+			const key = input.dataset.logoInput;
+			if (!key) continue;
+
+			input.addEventListener("change", () => {
+				const preview = root.querySelector<HTMLImageElement>(
+					`[data-logo-preview="${key}"]`,
+				);
+				const removeRow = root.querySelector<HTMLElement>(`[data-logo-remove="${key}"]`);
+				const removeCheck = root.querySelector<HTMLInputElement>(
+					`[data-logo-remove-check="${key}"]`,
+				);
+				if (!preview) return;
+
+				const prev = objectUrls.get(key);
+				if (prev) {
+					URL.revokeObjectURL(prev);
+					objectUrls.delete(key);
+				}
+
+				const file = input.files?.[0];
+				if (!file) return;
+
+				const url = URL.createObjectURL(file);
+				objectUrls.set(key, url);
+				preview.src = url;
+				preview.classList.remove("hidden");
+				removeRow?.classList.add("hidden");
+				if (removeCheck) removeCheck.checked = false;
+			});
+		}
+	}
+
+	bindLogoPreviews();
+	document.addEventListener("astro:page-load", () => bindLogoPreviews());
+</script>

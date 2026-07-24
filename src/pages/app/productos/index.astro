@@ -2,21 +2,44 @@
 import Dashboard from "@/layouts/Dashboard.astro";
 import EditIcon from "@/assets/lucide-icons-svg/square-pen.svg";
 import TrashIcon from "@/assets/lucide-icons-svg/trash-2.svg";
+import ChevronDown from "@tabler/icons/outline/chevron-down.svg";
+import ChevronUp from "@tabler/icons/outline/chevron-up.svg";
+import PhotoUpIcon from "@tabler/icons/outline/photo-up.svg";
+import SearchIcon from "@tabler/icons/outline/search.svg";
+import FilterIcon from "@tabler/icons/outline/filter.svg";
+import PlusIcon from "@tabler/icons/outline/plus.svg";
 import { requireOwner } from "@/lib/auth/require-owner";
 import {
 	assertCategoriaBelongsToRestaurant,
 	assertProductoBelongsToRestaurant,
 	deleteProductoViaApi,
+	formImageFile,
 	getCategoriaBySlug,
 	getProductoBySlug,
 	listProductosForRestaurant,
 	listCategoriasForRestaurant,
+	updateProductoViaApi,
 	updateProductosBatchViaApi,
+	uploadMediaViaApi,
 	writesEnabled,
 	type ProductoUpdateData,
 } from "@/lib/emdash/client";
 import { loadOwnerRestaurant } from "@/lib/emdash/owner-restaurant";
+import {
+	buildProductosCsvExport,
+	importProductosCsv,
+	previewProductosCsvImport,
+} from "@/lib/owner-edits/productos-csv-server";
 import { Button } from "@/components/starwind/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/starwind/dialog";
 import {
 	Dropdown,
 	DropdownCheckboxItem,
@@ -39,14 +62,44 @@ const canWrite = writesEnabled();
 const restaurantId = owner.restaurant.emdash_restaurant_id;
 
 const contentType = Astro.request.headers.get("content-type") ?? "";
-if (Astro.request.method === "POST" && contentType.includes("application/json")) {
+if (Astro.request.method === "POST" && contentType.includes("multipart/form-data")) {
 	if (!canWrite) {
 		return Response.json(
 			{ ok: false, error: "Escrituras no configuradas (falta EMDASH_API_TOKEN)." },
 			{ status: 403 },
 		);
 	}
+	try {
+		const form = await Astro.request.formData();
+		const action = String(form.get("action") ?? "");
+		if (action !== "uploadImage") {
+			return Response.json({ ok: false, error: "Acción desconocida." }, { status: 400 });
+		}
+		const id = String(form.get("id") ?? "").trim();
+		if (!id) {
+			return Response.json({ ok: false, error: "Id requerido." }, { status: 400 });
+		}
+		const imageFile = formImageFile(form, "imagen");
+		if (!imageFile) {
+			return Response.json({ ok: false, error: "Imagen requerida." }, { status: 400 });
+		}
+		const { entry } = await getProductoBySlug(id);
+		if (!entry || !assertProductoBelongsToRestaurant(entry, restaurantId)) {
+			return Response.json({ ok: false, error: "Producto no encontrado." }, { status: 404 });
+		}
+		const alt = String(form.get("nombre") ?? entry.data.nombre ?? "Imagen").trim() || "Imagen";
+		const imagen = await uploadMediaViaApi(imageFile, alt);
+		await updateProductoViaApi(entry.data.id, { imagen }, restaurantId);
+		return Response.json({ ok: true });
+	} catch (err) {
+		return Response.json(
+			{ ok: false, error: err instanceof Error ? err.message : "No se pudo subir la imagen" },
+			{ status: 500 },
+		);
+	}
+}
 
+if (Astro.request.method === "POST" && contentType.includes("application/json")) {
 	let body: unknown;
 	try {
 		body = await Astro.request.json();
@@ -58,6 +111,54 @@ if (Astro.request.method === "POST" && contentType.includes("application/json"))
 		typeof body === "object" && body && "action" in body
 			? String((body as { action: unknown }).action ?? "")
 			: "";
+
+	if (action === "exportCsv") {
+		try {
+			const csv = await buildProductosCsvExport(restaurantId, Astro.url.origin);
+			const filename = `productos-${restaurant.slug || "menu"}.csv`;
+			return new Response(csv, {
+				status: 200,
+				headers: {
+					"Content-Type": "text/csv; charset=utf-8",
+					"Content-Disposition": `attachment; filename="${filename}"`,
+				},
+			});
+		} catch (err) {
+			return Response.json(
+				{ ok: false, error: err instanceof Error ? err.message : "No se pudo exportar" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	if (action === "previewCsvImport") {
+		const csv =
+			typeof body === "object" && body && "csv" in body
+				? String((body as { csv: unknown }).csv ?? "")
+				: "";
+		if (!csv.trim()) {
+			return Response.json({ ok: false, error: "CSV vacío." }, { status: 400 });
+		}
+		try {
+			const result = await previewProductosCsvImport(csv, restaurantId);
+			if (!result.ok) {
+				return Response.json({ ok: false, error: result.error }, { status: 400 });
+			}
+			return Response.json(result);
+		} catch (err) {
+			return Response.json(
+				{ ok: false, error: err instanceof Error ? err.message : "No se pudo leer el CSV" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	if (!canWrite) {
+		return Response.json(
+			{ ok: false, error: "Escrituras no configuradas (falta EMDASH_API_TOKEN)." },
+			{ status: 403 },
+		);
+	}
 
 	if (action === "delete") {
 		const id =
@@ -77,6 +178,33 @@ if (Astro.request.method === "POST" && contentType.includes("application/json"))
 		} catch (err) {
 			return Response.json(
 				{ ok: false, error: err instanceof Error ? err.message : "No se pudo eliminar" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	if (action === "importCsv") {
+		const csv =
+			typeof body === "object" && body && "csv" in body
+				? String((body as { csv: unknown }).csv ?? "")
+				: "";
+		const categoriaResolutions =
+			typeof body === "object" && body && "categoriaResolutions" in body
+				? (body as { categoriaResolutions: unknown }).categoriaResolutions
+				: {};
+		if (!csv.trim()) {
+			return Response.json({ ok: false, error: "CSV vacío." }, { status: 400 });
+		}
+		try {
+			return await importProductosCsv({
+				csv,
+				restaurantId,
+				origin: Astro.url.origin,
+				categoriaResolutionsRaw: categoriaResolutions,
+			});
+		} catch (err) {
+			return Response.json(
+				{ ok: false, error: err instanceof Error ? err.message : "No se pudo importar" },
 				{ status: 500 },
 			);
 		}
@@ -223,24 +351,97 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 					<p class="text-muted-foreground">Items del menú de tu restaurante.</p>
 				</div>
 
-				<div class="flex gap-4">
-					<Button variant="outline">Descargar CSV</Button>
-					<Button variant="default">Subir CSV</Button>
+				<div class="flex flex-wrap gap-2">
+					{canWrite && (
+						<Button variant="default" href="/app/productos/new">
+							<PlusIcon class="size-4" />
+							Crear producto
+						</Button>
+					)}
+					<Button type="button" variant="outline" data-csv-download>
+						Descargar CSV
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						data-csv-upload
+						disabled={!canWrite}
+					>
+						Subir CSV
+					</Button>
+					<input
+						type="file"
+						accept=".csv,text/csv"
+						hidden
+						data-csv-file
+					/>
+					<input
+						type="file"
+						accept="image/*"
+						hidden
+						data-row-image-file
+					/>
 				</div>
 			</div>
 		</div>
-		<div class="w-full flex items-center justify-between gap-4">
-			<Input
-				type="search"
-				placeholder="Buscar producto"
-				class="w-full max-w-sm"
-				data-productos-search
-				autocomplete="off"
-			/>
+
+		<Dialog id="productos-csv-confirm-dialog" data-csv-confirm-dialog>
+			<DialogContent class="max-w-lg">
+				<DialogHeader>
+					<DialogTitle>Confirmar importación CSV</DialogTitle>
+					<DialogDescription data-csv-confirm-description>
+						Revisá los productos y categorías nuevas antes de continuar.
+					</DialogDescription>
+				</DialogHeader>
+				<div class="flex max-h-80 flex-col gap-4 overflow-y-auto py-2">
+					<div data-csv-new-productos-section hidden>
+						<p class="mb-2 text-sm font-medium" data-csv-new-productos-heading>
+							Productos nuevos
+						</p>
+						<ul
+							class="text-muted-foreground list-inside list-disc space-y-1 text-sm"
+							data-csv-new-productos-list
+						></ul>
+					</div>
+					<div data-csv-categorias-section hidden>
+						<p class="mb-2 text-sm font-medium">Categorías nuevas</p>
+						<p class="text-muted-foreground mb-2 text-sm">
+							Elegí crearlas o usar una categoría parecida existente.
+						</p>
+						<div class="flex flex-col gap-3" data-csv-categorias-list></div>
+					</div>
+				</div>
+				<DialogFooter>
+					<DialogClose asChild>
+						<Button type="button" variant="outline" data-csv-confirm-cancel>
+							Cancelar
+						</Button>
+					</DialogClose>
+					<Button type="button" variant="primary" data-csv-confirm-continue>
+						Continuar importación
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+		<div class="flex w-full flex-wrap items-center justify-between gap-4">
+			<div class="relative w-full max-w-sm">
+				<SearchIcon
+					class="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+					aria-hidden="true"
+				/>
+				<Input
+					type="search"
+					placeholder="Buscar producto"
+					class="w-full pl-9"
+					data-productos-search
+					autocomplete="off"
+				/>
+			</div>
 			<div class="flex gap-2">
 				<Dropdown data-categoria-filter>
 					<DropdownTrigger asChild>
 						<Button variant="outline" data-categoria-filter-trigger>
+							<FilterIcon class="size-4" aria-hidden="true" />
 							<span data-categoria-filter-label>Filtrar categorías</span>
 						</Button>
 					</DropdownTrigger>
@@ -308,13 +509,85 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				<thead class="[&_tr]:border-b">
 					<tr class="border-b border-border">
 						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
-							Nombre
+							<div class="flex items-center gap-2">
+								<span>Nombre</span>
+								<span class="inline-flex space-x-1">
+									<button
+										type="button"
+										class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+										data-sort-col="nombre"
+										data-sort-dir="asc"
+										aria-label="Ordenar Nombre ascendente"
+										aria-pressed="false"
+									>
+										<ChevronUp class="size-4" />
+									</button>
+									<button
+										type="button"
+										class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+										data-sort-col="nombre"
+										data-sort-dir="desc"
+										aria-label="Ordenar Nombre descendente"
+										aria-pressed="false"
+									>
+										<ChevronDown class="size-4" />
+									</button>
+								</span>
+							</div>
 						</th>
 						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
-							Categoría
+							<div class="flex items-center gap-2">
+								<span>Categoría</span>	
+								<span class="inline-flex space-x-1">
+									<button
+										type="button"
+										class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+										data-sort-col="categoria"
+										data-sort-dir="asc"
+										aria-label="Ordenar Categoría ascendente"
+										aria-pressed="false"
+									>
+										<ChevronUp class="size-4" />
+									</button>
+									<button
+										type="button"
+										class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+										data-sort-col="categoria"
+										data-sort-dir="desc"
+										aria-label="Ordenar Categoría descendente"
+										aria-pressed="false"
+									>
+										<ChevronDown class="size-4" />
+									</button>
+								</span>
+							</div>
 						</th>
 						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
-							Precio
+							<div class="flex items-center gap-2">
+								<span>Precio</span>
+								<span class="inline-flex space-x-1">
+									<button
+										type="button"
+										class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+										data-sort-col="precio"
+										data-sort-dir="asc"
+										aria-label="Ordenar Precio ascendente"
+										aria-pressed="false"
+									>
+										<ChevronUp class="size-4" />
+									</button>
+									<button
+										type="button"
+										class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+										data-sort-col="precio"
+										data-sort-dir="desc"
+										aria-label="Ordenar Precio descendente"
+										aria-pressed="false"
+									>
+										<ChevronDown class="size-4" />
+									</button>
+								</span>
+							</div>
 						</th>
 						<th class="text-muted-foreground h-10 px-3 text-left align-middle font-medium">
 							Acciones
@@ -332,7 +605,8 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 						productos.map((p) => {
 							const id = p.data.id;
 							const catId = p.data.categoria ?? "";
-							const detailHref = `/app/productos/${p.slug ?? id}`;
+							// Prefer URL slug; fall back to entry id / ULID for legacy null-slug rows.
+							const detailHref = `/app/productos/${p.slug || p.id || id}`;
 							return (
 								<tr
 									class="border-b border-border transition-colors"
@@ -387,6 +661,18 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 									</td>
 									<td class="p-2 align-middle">
 										<div class="flex items-center gap-1">
+											{canWrite && (
+												<Button
+													variant="ghost"
+													size="sm"
+													type="button"
+													title="Cargar imagen"
+													data-upload-image-id={id}
+													data-upload-image-name={p.data.nombre}
+												>
+													<PhotoUpIcon class="w-4 h-4" />
+												</Button>
+											)}
 											<Button variant="ghost" size="sm" href={detailHref} title="Editar detalle">
 												<EditIcon class="w-4 h-4" />
 											</Button>
@@ -469,7 +755,7 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 </Dashboard>
 
 <script>
-	import { postBatchUpdate, postDelete } from "@/lib/owner-edits/batch-client";
+	import { postBatchUpdate, postDelete, postJson } from "@/lib/owner-edits/batch-client";
 	import {
 		currentPage,
 		discardProductoEdits,
@@ -486,9 +772,13 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 		setProductoField,
 		setProductoFieldError,
 		showToast,
+		sortColumn,
+		sortDir,
 		type PageSize,
 		type ProductoField,
 		type ProductoPatch,
+		type SortColumn,
+		type SortDir,
 	} from "@/lib/owner-edits/productos-edits";
 	import { bindToastHost } from "@/lib/owner-edits/toast-ui";
 	import type { SelectChangeEvent } from "@/components/starwind/select";
@@ -540,6 +830,8 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 		const pagerLabel = root.querySelector<HTMLElement>("[data-pager-label]");
 		const pagePrevBtn = root.querySelector<HTMLButtonElement>("[data-page-prev]");
 		const pageNextBtn = root.querySelector<HTMLButtonElement>("[data-page-next]");
+		const table = root.querySelector<HTMLElement>("[data-productos-table]");
+		const searchEmptyRow = root.querySelector<HTMLElement>("[data-productos-search-empty]");
 
 		if (toastHost) bindToastHost(toastHost);
 
@@ -547,8 +839,14 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 		pageSize.set(20);
 		currentPage.set(1);
 		selectedCategorias.set([]);
+		sortColumn.set(null);
+		sortDir.set("asc");
 		if (searchInput) searchInput.value = "";
 		if (categoriaFilterSearch) categoriaFilterSearch.value = "";
+
+		root.querySelectorAll<HTMLElement>("[data-producto-row]").forEach((row, i) => {
+			row.dataset.sortIndex = String(i);
+		});
 
 		function foldSearchText(value: string): string {
 			return value
@@ -652,6 +950,35 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 			if (pageNextBtn) pageNextBtn.disabled = page >= maxPage;
 		}
 
+		function rowSortKey(row: HTMLElement, col: SortColumn): string | number {
+			if (col === "nombre") {
+				const el = row.querySelector<HTMLInputElement>('[data-field="nombre"]');
+				return foldSearchText(el?.value ?? "");
+			}
+			if (col === "categoria") {
+				const el = row.querySelector<HTMLSelectElement>('[data-field="categoria"]');
+				const label = el?.selectedOptions[0]?.textContent ?? "Sin categoría";
+				return foldSearchText(label);
+			}
+			const el = row.querySelector<HTMLInputElement>('[data-field="precio"]');
+			const n = Number(el?.value);
+			return Number.isFinite(n) ? n : 0;
+		}
+
+		function syncSortButtonUi() {
+			const col = sortColumn.get();
+			const dir = sortDir.get();
+			table?.querySelectorAll<HTMLButtonElement>("[data-sort-col]").forEach((btn) => {
+				const active =
+					col !== null &&
+					btn.dataset.sortCol === col &&
+					btn.dataset.sortDir === dir;
+				btn.setAttribute("aria-pressed", active ? "true" : "false");
+				btn.classList.toggle("text-foreground", active);
+				btn.classList.toggle("text-muted-foreground", !active);
+			});
+		}
+
 		function applyListView() {
 			const query = foldSearchText(searchQuery.get());
 			const selected = selectedCategorias.get();
@@ -667,6 +994,29 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				const match = (!query || nombre.includes(query)) && catOk;
 				if (match) matched.push(row);
 				else row.hidden = true;
+			}
+
+			const col = sortColumn.get();
+			const dir = sortDir.get();
+			if (col) {
+				const sign = dir === "asc" ? 1 : -1;
+				matched.sort((a, b) => {
+					const ka = rowSortKey(a, col);
+					const kb = rowSortKey(b, col);
+					if (typeof ka === "number" && typeof kb === "number") {
+						return (ka - kb) * sign;
+					}
+					return String(ka).localeCompare(String(kb), "es") * sign;
+				});
+			} else {
+				matched.sort(
+					(a, b) => Number(a.dataset.sortIndex ?? 0) - Number(b.dataset.sortIndex ?? 0),
+				);
+			}
+
+			if (tbody) {
+				for (const row of matched) tbody.appendChild(row);
+				if (searchEmptyRow) tbody.appendChild(searchEmptyRow);
 			}
 
 			const total = matched.length;
@@ -766,13 +1116,33 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 			currentPage.set(currentPage.get() + 1);
 		});
 
+		table?.addEventListener("click", (e) => {
+			const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-sort-col]");
+			if (!btn || !table.contains(btn)) return;
+			e.preventDefault();
+			const col = btn.dataset.sortCol as SortColumn | undefined;
+			const dir = btn.dataset.sortDir as SortDir | undefined;
+			if (!col || (dir !== "asc" && dir !== "desc")) return;
+			if (sortColumn.get() === col && sortDir.get() === dir) {
+				sortColumn.set(null);
+			} else {
+				sortColumn.set(col);
+				sortDir.set(dir);
+			}
+			currentPage.set(1);
+			syncSortButtonUi();
+		});
+
 		searchQuery.subscribe(applyListView);
 		pageSize.subscribe(applyListView);
 		currentPage.subscribe(applyListView);
 		selectedCategorias.subscribe(applyListView);
+		sortColumn.subscribe(applyListView);
+		sortDir.subscribe(applyListView);
 		updateCategoriaFilterLabel();
 		filterCategoriaOptions();
 		sizeCategoriaFilter();
+		syncSortButtonUi();
 		applyListView();
 
 		let categoriaIds = new Set<string>();
@@ -872,6 +1242,7 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 				}
 				setProductoFieldError(id, "precio", null);
 				setProductoField(id, "precio", Math.round(precio), original);
+				applyListView();
 				return;
 			}
 
@@ -996,7 +1367,26 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 			}
 		});
 
+		const rowImageInput = root.querySelector<HTMLInputElement>("[data-row-image-file]");
+		let pendingImageUpload: { id: string; nombre: string } | null = null;
+
 		root.addEventListener("click", async (e) => {
+			const uploadBtn = (e.target as HTMLElement).closest<HTMLElement>(
+				"[data-upload-image-id]",
+			);
+			if (uploadBtn && canWrite && !saving.get()) {
+				e.preventDefault();
+				const id = uploadBtn.dataset.uploadImageId;
+				if (!id || !rowImageInput) return;
+				pendingImageUpload = {
+					id,
+					nombre: uploadBtn.dataset.uploadImageName ?? "Imagen",
+				};
+				rowImageInput.value = "";
+				rowImageInput.click();
+				return;
+			}
+
 			const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-delete-id]");
 			if (!btn || !canWrite || saving.get()) return;
 			e.preventDefault();
@@ -1020,11 +1410,329 @@ const categoriaIdsJson = JSON.stringify(categorias.map((c) => c.data.id));
 			}
 		});
 
+		rowImageInput?.addEventListener("change", async () => {
+			const file = rowImageInput.files?.[0];
+			const target = pendingImageUpload;
+			rowImageInput.value = "";
+			pendingImageUpload = null;
+			if (!file || !target || !canWrite || saving.get()) return;
+
+			saving.set(true);
+			try {
+				const body = new FormData();
+				body.append("action", "uploadImage");
+				body.append("id", target.id);
+				body.append("nombre", target.nombre);
+				body.append("imagen", file, file.name || "imagen");
+				const res = await fetch("/app/productos", {
+					method: "POST",
+					headers: { Accept: "application/json" },
+					body,
+				});
+				const text = await res.text();
+				let data: { ok?: boolean; error?: string } = {};
+				if (text) {
+					try {
+						data = JSON.parse(text) as { ok?: boolean; error?: string };
+					} catch {
+						/* ignore */
+					}
+				}
+				if (!res.ok || !data.ok) {
+					throw new Error(data.error ?? `Error ${res.status}`);
+				}
+				showToast("success", "Imagen actualizada.");
+			} catch (err) {
+				showToast("error", err instanceof Error ? err.message : "No se pudo subir la imagen");
+			} finally {
+				saving.set(false);
+			}
+		});
+
 		window.addEventListener("beforeunload", (e) => {
 			if (productosPendingCount.get() > 0) {
 				e.preventDefault();
 				e.returnValue = "";
 			}
+		});
+
+		type NewCategoriaPreview = {
+			key: string;
+			displayName: string;
+			similar: { id: string; nombre: string; distance: number }[];
+		};
+		type CategoriaResolution =
+			| { action: "create" }
+			| { action: "use"; categoriaId: string };
+
+		const csvDownloadBtn = root.querySelector<HTMLButtonElement>("[data-csv-download]");
+		const csvUploadBtn = root.querySelector<HTMLButtonElement>("[data-csv-upload]");
+		const csvFileInput = root.querySelector<HTMLInputElement>("[data-csv-file]");
+		const csvDialog = document.querySelector<HTMLElement>("[data-csv-confirm-dialog]");
+		const csvList = csvDialog?.querySelector<HTMLElement>("[data-csv-categorias-list]");
+		const csvCatsSection = csvDialog?.querySelector<HTMLElement>("[data-csv-categorias-section]");
+		const csvProductosSection = csvDialog?.querySelector<HTMLElement>(
+			"[data-csv-new-productos-section]",
+		);
+		const csvProductosList = csvDialog?.querySelector<HTMLElement>(
+			"[data-csv-new-productos-list]",
+		);
+		const csvProductosHeading = csvDialog?.querySelector<HTMLElement>(
+			"[data-csv-new-productos-heading]",
+		);
+		const csvConfirmBtn = csvDialog?.querySelector<HTMLButtonElement>(
+			"[data-csv-confirm-continue]",
+		);
+
+		let pendingCsvText: string | null = null;
+		let csvBusy = false;
+
+		const csvToastRaw = sessionStorage.getItem("digimenu-csv-toast");
+		if (csvToastRaw) {
+			sessionStorage.removeItem("digimenu-csv-toast");
+			try {
+				const t = JSON.parse(csvToastRaw) as { type: "success" | "error"; message: string };
+				if (t?.message) showToast(t.type === "error" ? "error" : "success", t.message);
+			} catch {
+				/* ignore */
+			}
+		}
+
+		async function downloadProductosCsv() {
+			if (csvBusy) return;
+			csvBusy = true;
+			try {
+				const res = await fetch("/app/productos", {
+					method: "POST",
+					headers: {
+						Accept: "text/csv",
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({ action: "exportCsv" }),
+				});
+				if (!res.ok) {
+					let msg = `Error ${res.status}`;
+					try {
+						const data = (await res.json()) as { error?: string };
+						if (data.error) msg = data.error;
+					} catch {
+						/* ignore */
+					}
+					throw new Error(msg);
+				}
+				const blob = await res.blob();
+				const disp = res.headers.get("Content-Disposition") ?? "";
+				const match = /filename="([^"]+)"/.exec(disp);
+				const filename = match?.[1] ?? "productos.csv";
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = filename;
+				a.click();
+				URL.revokeObjectURL(url);
+				showToast("success", "CSV descargado.");
+			} catch (err) {
+				showToast("error", err instanceof Error ? err.message : "No se pudo descargar");
+			} finally {
+				csvBusy = false;
+			}
+		}
+
+		function openCsvDialog() {
+			csvDialog?.dispatchEvent(new CustomEvent("dialog:open"));
+		}
+
+		function closeCsvDialog() {
+			csvDialog?.dispatchEvent(new CustomEvent("dialog:close"));
+		}
+
+		function renderNewProductos(names: string[]) {
+			if (!csvProductosSection || !csvProductosList || !csvProductosHeading) return;
+			if (names.length === 0) {
+				csvProductosSection.hidden = true;
+				return;
+			}
+			csvProductosSection.hidden = false;
+			csvProductosHeading.textContent =
+				names.length === 1
+					? "Se creará 1 producto nuevo"
+					: `Se crearán ${names.length} productos nuevos`;
+			csvProductosList.replaceChildren();
+			const shown = names.slice(0, 12);
+			for (const name of shown) {
+				const li = document.createElement("li");
+				li.textContent = name;
+				csvProductosList.append(li);
+			}
+			if (names.length > shown.length) {
+				const li = document.createElement("li");
+				li.textContent = `…y ${names.length - shown.length} más`;
+				csvProductosList.append(li);
+			}
+		}
+
+		function renderCategoriaResolutions(items: NewCategoriaPreview[]) {
+			if (!csvList || !csvCatsSection) return;
+			if (items.length === 0) {
+				csvCatsSection.hidden = true;
+				csvList.replaceChildren();
+				return;
+			}
+			csvCatsSection.hidden = false;
+			csvList.replaceChildren();
+			for (const item of items) {
+				const wrap = document.createElement("div");
+				wrap.className = "flex flex-col gap-1.5 rounded-md border border-border p-3";
+				const label = document.createElement("p");
+				label.className = "text-sm font-medium";
+				label.textContent = item.displayName;
+				const select = document.createElement("select");
+				select.className =
+					"border-input bg-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none";
+				select.dataset.csvCatKey = item.key;
+				const createOpt = document.createElement("option");
+				createOpt.value = "create";
+				createOpt.textContent = `Crear «${item.displayName}»`;
+				select.append(createOpt);
+				for (const sim of item.similar) {
+					const opt = document.createElement("option");
+					opt.value = `use:${sim.id}`;
+					opt.textContent = `Usar «${sim.nombre}»`;
+					select.append(opt);
+				}
+				if (item.similar.length > 0) {
+					select.value = `use:${item.similar[0]!.id}`;
+				} else {
+					select.value = "create";
+				}
+				wrap.append(label, select);
+				csvList.append(wrap);
+			}
+		}
+
+		function collectResolutionsFromDialog(): Record<string, CategoriaResolution> {
+			const out: Record<string, CategoriaResolution> = {};
+			csvList?.querySelectorAll<HTMLSelectElement>("select[data-csv-cat-key]").forEach((sel) => {
+				const key = sel.dataset.csvCatKey;
+				if (!key) return;
+				const v = sel.value;
+				if (v.startsWith("use:")) {
+					out[key] = { action: "use", categoriaId: v.slice(4) };
+				} else {
+					out[key] = { action: "create" };
+				}
+			});
+			return out;
+		}
+
+		async function runCsvImport(resolutions: Record<string, CategoriaResolution>) {
+			if (!pendingCsvText || csvBusy) return;
+			csvBusy = true;
+			try {
+				const result = await postJson<{
+					ok: boolean;
+					created?: number;
+					updated?: number;
+					categoriasCreated?: number;
+					failed?: { row: number; error: string }[];
+					error?: string;
+				}>("/app/productos", {
+					action: "importCsv",
+					csv: pendingCsvText,
+					categoriaResolutions: resolutions,
+				});
+				pendingCsvText = null;
+				closeCsvDialog();
+				const created = result.created ?? 0;
+				const updated = result.updated ?? 0;
+				const cats = result.categoriasCreated ?? 0;
+				const failCount = result.failed?.length ?? 0;
+				const parts = [
+					created ? `${created} creados` : null,
+					updated ? `${updated} actualizados` : null,
+					cats ? `${cats} categorías nuevas` : null,
+				].filter(Boolean);
+				const message =
+					failCount === 0
+						? parts.length
+							? `Importación OK: ${parts.join(", ")}.`
+							: "Nada que importar."
+						: `${parts.join(", ") || "Parcial"}; ${failCount} fila(s) fallaron` +
+							(result.failed?.[0]
+								? ` (fila ${result.failed[0].row}: ${result.failed[0].error})`
+								: ".");
+				if (created + updated + cats > 0) {
+					sessionStorage.setItem(
+						"digimenu-csv-toast",
+						JSON.stringify({
+							type: failCount === 0 ? "success" : "error",
+							message,
+						}),
+					);
+					window.location.reload();
+				} else if (failCount === 0) {
+					showToast("success", message);
+				} else {
+					showToast("error", message);
+				}
+			} catch (err) {
+				showToast("error", err instanceof Error ? err.message : "No se pudo importar");
+			} finally {
+				csvBusy = false;
+			}
+		}
+
+		async function handleCsvFile(file: File) {
+			if (!canWrite || csvBusy) return;
+			const text = await file.text();
+			pendingCsvText = text;
+			csvBusy = true;
+			try {
+				const preview = await postJson<{
+					ok: boolean;
+					rowCount?: number;
+					updateCount?: number;
+					newProductos?: string[];
+					newCategorias?: NewCategoriaPreview[];
+					error?: string;
+				}>("/app/productos", {
+					action: "previewCsvImport",
+					csv: text,
+				});
+				csvBusy = false;
+				const news = preview.newCategorias ?? [];
+				const newProductos = preview.newProductos ?? [];
+				if (news.length === 0 && newProductos.length === 0) {
+					await runCsvImport({});
+					return;
+				}
+				renderNewProductos(newProductos);
+				renderCategoriaResolutions(news);
+				openCsvDialog();
+			} catch (err) {
+				pendingCsvText = null;
+				csvBusy = false;
+				showToast("error", err instanceof Error ? err.message : "CSV inválido");
+			}
+		}
+
+		csvDownloadBtn?.addEventListener("click", () => {
+			void downloadProductosCsv();
+		});
+		csvUploadBtn?.addEventListener("click", () => {
+			if (!canWrite || csvBusy) return;
+			csvFileInput?.click();
+		});
+		csvFileInput?.addEventListener("change", () => {
+			const file = csvFileInput.files?.[0];
+			csvFileInput.value = "";
+			if (file) void handleCsvFile(file);
+		});
+		csvConfirmBtn?.addEventListener("click", () => {
+			void runCsvImport(collectResolutionsFromDialog());
+		});
+		csvDialog?.querySelector("dialog")?.addEventListener("close", () => {
+			if (!csvBusy) pendingCsvText = null;
 		});
 	}
 

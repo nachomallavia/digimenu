@@ -12,7 +12,8 @@ export type OwnerRestaurantSnapshot = {
 	descripcion?: string | null;
 	menu_layout?: unknown;
 	theme?: unknown;
-	logo?: OwnerSnapshotLogo;
+	logo_light?: OwnerSnapshotLogo;
+	logo_dark?: OwnerSnapshotLogo;
 };
 
 export type OwnerSessionPayload = {
@@ -105,7 +106,12 @@ function parseSnapshot(raw: unknown): OwnerRestaurantSnapshot | undefined {
 						: undefined,
 		menu_layout: obj.menu_layout,
 		theme: obj.theme,
-		logo: parseSnapshotLogo(obj.logo),
+		// Prefer new fields; fall back to legacy `logo` → light.
+		logo_light: (() => {
+			const light = parseSnapshotLogo(obj.logo_light);
+			return light !== undefined ? light : parseSnapshotLogo(obj.logo);
+		})(),
+		logo_dark: parseSnapshotLogo(obj.logo_dark),
 	};
 }
 

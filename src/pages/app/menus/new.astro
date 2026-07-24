@@ -1,0 +1,173 @@
+---
+import Dashboard from "@/layouts/Dashboard.astro";
+import { requireOwner } from "@/lib/auth/require-owner";
+import {
+	createMenuViaApi,
+	listMenusForRestaurant,
+	writesEnabled,
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "@/lib/emdash/owner-restaurant";
+import { MENU_NAME_SUGGESTIONS } from "@/lib/menu-suggestions";
+import { listMenuTemplates, resolveMenuTemplateId } from "@/lib/menu-templates/registry";
+import { Button } from "@/components/starwind/button";
+import { Input } from "@/components/starwind/input";
+import { Label } from "@/components/starwind/label";
+import { Textarea } from "@/components/starwind/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/starwind/card";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const canWrite = writesEnabled();
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+const templates = listMenuTemplates();
+
+let error: string | null = null;
+let formValues = {
+	nombre: "",
+	descripcion: "",
+	plantilla: "classic",
+};
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const nombre = String(form.get("nombre") ?? "").trim();
+	const descripcion = String(form.get("descripcion") ?? "").trim();
+	const plantilla = resolveMenuTemplateId(form.get("plantilla"));
+
+	formValues = { nombre, descripcion, plantilla };
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (!nombre) throw new Error("El nombre es obligatorio.");
+			const { entries } = await listMenusForRestaurant(restaurantId);
+			const maxOrden = entries.reduce((max, m) => Math.max(max, m.data.orden ?? 0), -1);
+			const created = await createMenuViaApi({
+				nombre,
+				descripcion: descripcion || null,
+				plantilla,
+				orden: maxOrden + 1,
+				restauranteId: restaurantId,
+			});
+			const id = created.item?.slug ?? created.item?.id;
+			if (!id) throw new Error("No se pudo crear el menú.");
+			return Astro.redirect(savedRedirect(`/app/menus/${id}`));
+		} catch (err) {
+			error = err instanceof Error ? err.message : "No se pudo crear el menú";
+		}
+	}
+}
+---
+
+<Dashboard
+	title="DigiMenu — Nuevo menú"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-2xl flex-col gap-6">
+		<div>
+			<p class="mb-1 text-sm">
+				<a href="/app/menus" class="text-muted-foreground hover:text-foreground">← Menús</a>
+			</p>
+			<h1 class="text-2xl font-semibold tracking-tight">Nuevo menú</h1>
+			<p class="text-muted-foreground">
+				Una carta del restaurante. Después podés elegir plantilla y productos.
+			</p>
+		</div>
+
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<Card>
+			<CardHeader>
+				<CardTitle>Datos</CardTitle>
+				<CardDescription>Nombre y plantilla inicial.</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<form method="POST" class="flex flex-col gap-5" data-astro-reload>
+					<div class="flex flex-col gap-1.5">
+						<Label for="nombre">Nombre</Label>
+						<Input
+							id="nombre"
+							name="nombre"
+							required
+							value={formValues.nombre}
+							disabled={!canWrite}
+							data-menu-nombre
+						/>
+						<div class="flex flex-wrap gap-1.5 pt-1">
+							{
+								MENU_NAME_SUGGESTIONS.map((s) => (
+									<button
+										type="button"
+										class="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+										data-suggest={s}
+										disabled={!canWrite}
+									>
+										{s}
+									</button>
+								))
+							}
+						</div>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="descripcion">Descripción</Label>
+						<Textarea
+							id="descripcion"
+							name="descripcion"
+							rows={2}
+							disabled={!canWrite}
+						>{formValues.descripcion}</Textarea>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="plantilla">Plantilla</Label>
+						<select
+							id="plantilla"
+							name="plantilla"
+							class="border-input bg-background h-11 rounded-md border px-3 text-sm"
+							disabled={!canWrite}
+						>
+							{
+								templates.map((t) => (
+									<option value={t.id} selected={formValues.plantilla === t.id}>
+										{t.label} — {t.description}
+									</option>
+								))
+							}
+						</select>
+					</div>
+					<div>
+						<Button type="submit" variant="primary" disabled={!canWrite}>
+							Crear menú
+						</Button>
+					</div>
+				</form>
+			</CardContent>
+		</Card>
+	</div>
+</Dashboard>
+
+<script>
+	function bindSuggestions() {
+		const input = document.querySelector<HTMLInputElement>("[data-menu-nombre]");
+		if (!input) return;
+		document.querySelectorAll<HTMLButtonElement>("[data-suggest]").forEach((btn) => {
+			if (btn.dataset.bound === "1") return;
+			btn.dataset.bound = "1";
+			btn.addEventListener("click", () => {
+				input.value = btn.dataset.suggest ?? "";
+				input.focus();
+			});
+		});
+	}
+	bindSuggestions();
+	document.addEventListener("astro:page-load", bindSuggestions);
+</script>

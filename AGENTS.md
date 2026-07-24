@@ -27,7 +27,7 @@ The admin UI is at `http://localhost:4321/_emdash/admin`.
 
 DigiMenu front pages use **Starwind UI (free)** + Tailwind v4 via `@tailwindcss/postcss` (not `@tailwindcss/vite` — that plugin empties `/_emdash/admin` SSR HTML).
 
-Layouts: **Root** → **Menu** (público/`/m`) or **Dashboard** (`/app` owner shell) / **AppGuest** (login/pending). Per-restaurant menu theming applies on `Menu` only (`theme` / `menu_layout`), not on Dashboard or EmDash admin.
+Layouts: **Root** → **Menu** (público/`/m`) or **Dashboard** (`/app` owner shell) / **AppGuest** (login/pending). Per-restaurant menu theming applies on `Menu` only (`theme` / template via `menus.plantilla`), not on Dashboard or EmDash admin.
 
 ## Skills
 
@@ -59,11 +59,13 @@ The EmDash docs are available as an MCP server at `https://docs.emdashcms.com/mc
 
 ## Schema
 
-- `restaurantes`: `nombre` (req), `descripcion`, `logo` (optional), `menu_layout` (json), `theme` (json).
+- `restaurantes`: `nombre` (req), `descripcion`, `logo_light` / `logo_dark` (optional images), `menu_layout` (json, legacy Classic knobs), `theme` (json).
+- `menus`: `nombre` (req), `restaurante` (reference, req), `descripcion`, `orden`, `plantilla` (string; default `classic`). Per-restaurant cartas; each can use a different template.
+- `tags`: `nombre` (req), `restaurante` (reference, req), `icon` (optional). Per-restaurant etiquetas.
 - `categorias`: `nombre` (req), `restaurante` (reference, req), `icon` (string, Tabler id), `cover` (image), `orden` (integer; menu section order).
-- `productos`: `nombre`, `precio` (req), `descripcion`, `imagen`, `restaurante` (reference; auto-filled by plugin when empty and only one restaurant exists), `categoria` (reference → categorias, optional; one per product).
+- `productos`: `nombre`, `precio` (req), `descripcion`, `imagen`, `restaurante` (reference; auto-filled by plugin when empty and only one restaurant exists), `categoria` (reference → categorias, optional), `menus` (json string[] of menu ids), `tags` (json string[] of tag ids).
 - `pages`: `title`, `content` (Portable Text).
-- Single `primary` menu.
+- Single `primary` menu (EmDash nav, unrelated to restaurant `menus` collection).
 
 Site settings: Digimenu title, dateFormat `DD/MM/YY`.
 

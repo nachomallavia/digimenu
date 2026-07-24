@@ -1,0 +1,17 @@
+---
+import { requireOwner } from "../../../lib/auth/require-owner";
+import { getDefaultMenuForRestaurant, menuPathId } from "../../../lib/emdash/owner-menus";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const menu = await getDefaultMenuForRestaurant(auth.owner.restaurant.emdash_restaurant_id);
+if (!menu) {
+	return Astro.redirect("/app/menus");
+}
+return Astro.redirect(`/app/menus/${menuPathId(menu)}`);
+---

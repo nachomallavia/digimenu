@@ -1,0 +1,180 @@
+---
+import Dashboard from "@/layouts/Dashboard.astro";
+import CategoryCard from "@/components/CategoryCard.astro";
+import { requireOwner } from "@/lib/auth/require-owner";
+import {
+	assertCategoriaBelongsToRestaurant,
+	deleteCategoriaViaApi,
+	formImageFile,
+	getCategoriaBySlug,
+	listCategoriasForRestaurant,
+	updateCategoriaViaApi,
+	uploadMediaViaApi,
+	writesEnabled,
+	type EmDashImage,
+} from "@/lib/emdash/client";
+import { loadOwnerRestaurant, savedRedirect } from "@/lib/emdash/owner-restaurant";
+import { isCategoryIconId } from "@/lib/category-icons";
+import { Button } from "@/components/starwind/button";
+import PlusIcon from "@tabler/icons/outline/plus.svg";
+
+export const prerender = false;
+
+const auth = await requireOwner(Astro.request, Astro.cookies);
+if (!auth.ok) {
+	return Astro.redirect(auth.redirect);
+}
+
+const { owner } = auth;
+const canWrite = writesEnabled();
+let error: string | null = null;
+const saved = Astro.url.searchParams.get("saved") === "1";
+const savedAction = Astro.url.searchParams.get("action");
+const restaurantId = owner.restaurant.emdash_restaurant_id;
+
+/** Load an owned categoria or throw (also guards cross-tenant access). */
+async function ownedCategoria(slug: string) {
+	const { entry } = await getCategoriaBySlug(slug);
+	if (!entry || !assertCategoriaBelongsToRestaurant(entry, restaurantId)) {
+		throw new Error("Categoría no encontrada.");
+	}
+	return entry;
+}
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const action = String(form.get("action") ?? "");
+
+	if (!canWrite) {
+		error = "Escrituras no configuradas (falta EMDASH_API_TOKEN).";
+	} else {
+		try {
+			if (action === "save") {
+				const slug = String(form.get("slug") ?? "");
+				const label = String(form.get("label") ?? "").trim();
+				if (!slug || !label) throw new Error("Datos incompletos.");
+
+				const entry = await ownedCategoria(slug);
+
+				const iconRaw = String(form.get("icon") ?? "").trim();
+				const icon = iconRaw && isCategoryIconId(iconRaw) ? iconRaw : null;
+				const removeCover = form.get("remove_cover") === "1";
+				const coverFile = formImageFile(form, "cover");
+
+				let cover: EmDashImage | undefined;
+				if (removeCover) {
+					cover = null;
+				} else if (coverFile) {
+					cover = await uploadMediaViaApi(coverFile, label);
+				}
+
+				await updateCategoriaViaApi(
+					entry.data.id,
+					{
+						nombre: label,
+						icon,
+						...(cover !== undefined ? { cover } : {}),
+					},
+					restaurantId,
+				);
+				return Astro.redirect(savedRedirect("/app/categorias", { action: "save" }));
+			} else if (action === "delete") {
+				const slug = String(form.get("slug") ?? "");
+				if (!slug) throw new Error("Slug requerido.");
+				const entry = await ownedCategoria(slug);
+				await deleteCategoriaViaApi(entry.data.id, restaurantId);
+				return Astro.redirect(savedRedirect("/app/categorias", { action: "delete" }));
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Error al guardar categoría";
+		}
+	}
+}
+
+const restaurant = await loadOwnerRestaurant(owner, { chromeOnly: true });
+const { entries: categorias, cacheHint } = await listCategoriasForRestaurant(restaurantId);
+if (cacheHint && Astro.cache?.enabled) Astro.cache.set(cacheHint);
+
+const message = saved
+	? savedAction === "delete"
+		? "Categoría eliminada."
+		: savedAction === "save"
+			? "Categoría actualizada."
+			: "Categoría creada."
+	: null;
+---
+
+<Dashboard
+	title="DigiMenu — Categorías"
+	email={owner.email}
+	restaurantSlug={restaurant.slug}
+	restaurantName={restaurant.name}
+>
+	<div class="mx-auto flex max-w-4xl flex-col gap-6">
+		<div class="flex flex-wrap items-end justify-between gap-3">
+			<div class="flex flex-col gap-1">
+				<h1 class="text-2xl font-semibold tracking-tight">Categorías</h1>
+				<p class="text-muted-foreground">
+					Secciones del menú. Opcionalmente elegí un icono y/o una imagen de portada.
+				</p>
+			</div>
+			{
+				canWrite && (
+					<Button variant="primary" href="/app/categorias/new">
+						<PlusIcon class="size-4" />
+						Crear categoría
+					</Button>
+				)
+			}
+		</div>
+
+		{message && <p class="text-sm text-success">{message}</p>}
+		{error && <p class="text-sm text-error">{error}</p>}
+
+		<div class="flex flex-col gap-2">
+			{
+				categorias.length === 0 ? (
+					<>
+						<h2 class="text-lg font-semibold tracking-tight">No hay categorías todavía.</h2>
+						<p class="text-muted-foreground text-sm">
+							{canWrite ? (
+								<>
+									Creá la primera haciendo click{" "}
+									<a href="/app/categorias/new" class="underline">
+										acá
+									</a>
+									.
+								</>
+							) : (
+								"No hay categorías para mostrar."
+							)}
+						</p>
+					</>
+				) : (
+					<>
+						<h2 class="text-lg font-semibold tracking-tight">Existentes</h2>
+						<p class="text-muted-foreground text-sm">
+							Editá nombre, icono y portada de cada categoría.
+						</p>
+					</>
+				)
+			}
+		</div>
+
+		{
+			categorias.length > 0 && (
+				<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
+					{categorias.map((cat) => (
+						<CategoryCard
+							slug={cat.id}
+							nombre={cat.data.nombre}
+							icon={cat.data.icon}
+							cover={cat.data.cover}
+							canWrite={canWrite}
+						/>
+					))}
+				</div>
+			)
+		}
+	</div>
+</Dashboard>
